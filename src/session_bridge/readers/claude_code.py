@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ..ir import (
     PLACEHOLDER_MODELS,
@@ -196,6 +196,12 @@ def read_claude_code(path: str | Path) -> Session:
     for rec in records:
         rtype = rec.get("type")
         if rtype not in _MESSAGE_TYPES:
+            continue
+        # Skip Claude Code's own API-error notices (auth failure, rate limit,
+        # connection dropped). They are stamped type:assistant but are harness
+        # status messages, not model output — ingesting their text ("API Error:
+        # ...") would fabricate an assistant turn in the converted transcript.
+        if rec.get("isApiErrorMessage"):
             continue
         meta = _extract_meta(rec, meta)
         msg = rec.get("message", {})
