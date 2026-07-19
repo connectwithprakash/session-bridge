@@ -143,8 +143,22 @@ def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
             queue.append((seq, content))
             seq += 1
         elif op == "dequeue" and queue:
-            # A dequeue consumes this session's oldest queued item.
+            # A dequeue (content-less) consumes this session's oldest queued item.
             queue.pop(0)
+        elif op == "remove" and queue:
+            # Claude Code auto-withdraws an undelivered queued item (e.g. a
+            # background-task notification) via a `remove` op that carries the
+            # SAME content as the enqueue it cancels. Consume the matching entry
+            # (by content), else the item is falsely reported as still pending.
+            for i, (_, c) in enumerate(queue):
+                if c == content:
+                    queue.pop(i)
+                    break
+            else:
+                # No content match (unexpected): fall back to consuming the oldest
+                # so a removal still reduces the pending count rather than being
+                # ignored entirely.
+                queue.pop(0)
     remaining = [item for q in per_session.values() for item in q]
     remaining.sort(key=lambda item: item[0])
     return tuple(content for _, content in remaining)
