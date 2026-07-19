@@ -247,7 +247,7 @@ context as `role: "developer"` input_text blocks.)
 ```json
 { "type": "message", "role": "user",
   "content": [ { "type": "input_text",
-    "text": "<environment_context>\n  <cwd>/Users/bodhi/Developer</cwd>\n  <shell>zsh</shell>\n  <current_date>2026-04-09</current_date>\n  <timezone>America/Los_Angeles</timezone>\n</environment_context>" } ] }
+    "text": "<environment_context>\n  <cwd>/Users/&lt;user&gt;/Developer</cwd>\n  <shell>zsh</shell>\n  <current_date>&lt;REDACTED&gt;</current_date>\n  <timezone>&lt;REDACTED&gt;</timezone>\n</environment_context>" } ] }
 ```
 
 There is *also* an `event_msg` echo of the raw user text:
