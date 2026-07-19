@@ -52,11 +52,21 @@ def _user_content(msg: Message) -> Any:
         if b.type is BlockType.TEXT and b.text:
             blocks.append({"type": "text", "text": b.text})
         elif b.type is BlockType.TOOL_RESULT:
+            # Rebuild the tool_result content: if it carried non-text parts
+            # (result_parts, e.g. an image), re-emit them as a block list with the
+            # text alongside — losslessly reconstructing the original shape.
+            if b.result_parts:
+                content: Any = []
+                if b.text:
+                    content.append({"type": "text", "text": b.text})
+                content.extend(b.result_parts)
+            else:
+                content = b.text or ""
             blocks.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": b.call_id,
-                    "content": b.text or "",
+                    "content": content,
                     "is_error": b.is_error,
                 }
             )

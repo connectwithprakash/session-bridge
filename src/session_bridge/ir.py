@@ -87,6 +87,11 @@ class ContentBlock:
     is_error: bool = False
     raw_block: Optional[dict[str, Any]] = None
     raw_kind: Optional[str] = None
+    # On a TOOL_RESULT: the original non-text parts (e.g. an image) of a
+    # tool_result whose content was a block list. Carried WITH the result rather
+    # than as sibling RAW blocks, so a same-harness writer re-emits them inside
+    # the result's own content list and no writer mistakes them for a new turn.
+    result_parts: tuple[dict[str, Any], ...] = ()
 
     @staticmethod
     def text_block(text: str) -> "ContentBlock":
@@ -115,12 +120,18 @@ class ContentBlock:
         )
 
     @staticmethod
-    def tool_result(call_id: str, text: str, is_error: bool = False) -> "ContentBlock":
+    def tool_result(
+        call_id: str,
+        text: str,
+        is_error: bool = False,
+        result_parts: tuple[dict[str, Any], ...] = (),
+    ) -> "ContentBlock":
         return ContentBlock(
             type=BlockType.TOOL_RESULT,
             call_id=call_id,
             text=text,
             is_error=is_error,
+            result_parts=tuple(copy.deepcopy(p) for p in result_parts),
         )
 
 

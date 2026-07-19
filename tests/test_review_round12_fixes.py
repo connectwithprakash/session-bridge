@@ -29,15 +29,16 @@ def _session_with_image_tool_result(tmp_path):
     return f
 
 
-def test_image_in_tool_result_preserved_as_raw(tmp_path):
+def test_image_in_tool_result_preserved_on_result(tmp_path):
     session = read_claude_code(_session_with_image_tool_result(tmp_path))
-    raws = [b for m in session.messages for b in m.content if b.type is BlockType.RAW]
-    assert len(raws) == 1
-    assert raws[0].raw_kind == "image"
-    assert raws[0].raw_block["source"]["data"] == "AAAA"
-    # the tool_result block still exists (linkage preserved)
+    # image is carried ON the tool_result (result_parts), not as a sibling block,
+    # so writers never mistake it for a separate turn
     results = [b for m in session.messages for b in m.content if b.type is BlockType.TOOL_RESULT]
     assert len(results) == 1 and results[0].call_id == "tu1"
+    assert len(results[0].result_parts) == 1
+    assert results[0].result_parts[0]["source"]["data"] == "AAAA"
+    # no phantom RAW sibling block
+    assert not any(b.type is BlockType.RAW for m in session.messages for b in m.content)
 
 
 def test_image_tool_result_survives_same_harness_round_trip(tmp_path):
@@ -46,8 +47,11 @@ def test_image_tool_result_survives_same_harness_round_trip(tmp_path):
     out = tmp_path / "out.jsonl"
     out.write_text("\n".join(json.dumps(r) for r in result.records) + "\n", encoding="utf-8")
     back = read_claude_code(out)
-    raws = [b for m in back.messages for b in m.content if b.type is BlockType.RAW]
-    assert len(raws) == 1 and raws[0].raw_block["source"]["data"] == "AAAA"
+    results = [b for m in back.messages for b in m.content if b.type is BlockType.TOOL_RESULT]
+    assert len(results) == 1
+    assert results[0].result_parts and results[0].result_parts[0]["source"]["data"] == "AAAA"
+    # no phantom message/turn was introduced
+    assert len(back.messages) == len(read_claude_code(src).messages)
 
 
 def test_image_tool_result_loss_reported_cross_harness(tmp_path):
@@ -73,8 +77,7 @@ def test_mixed_text_and_image_tool_result(tmp_path):
     session = read_claude_code(f)
     result = next(b for m in session.messages for b in m.content if b.type is BlockType.TOOL_RESULT)
     assert result.text == "here is the screenshot"
-    raws = [b for m in session.messages for b in m.content if b.type is BlockType.RAW]
-    assert len(raws) == 1
+    assert len(result.result_parts) == 1  # image carried on the result
 
 
 def test_plain_text_tool_result_unaffected(tmp_path):

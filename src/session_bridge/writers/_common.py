@@ -143,12 +143,25 @@ def report_losses(session: Session, target: str) -> ConversionReport:
     # not on the target capability alone.
     lossless_raw = "raw_passthrough" in caps and src == target
     if not lossless_raw:
+        # Count standalone RAW blocks AND non-text parts carried on tool_results
+        # (result_parts) — both are source content the IR can't type and that a
+        # non-same-harness target degrades to a placeholder.
         raw_blocks = sum(
-            1 for m in session.messages for b in m.content if b.type is BlockType.RAW
+            1
+            for m in session.messages
+            for b in m.content
+            if b.type is BlockType.RAW
         )
-        if raw_blocks:
+        result_part_count = sum(
+            len(b.result_parts)
+            for m in session.messages
+            for b in m.content
+            if b.type is BlockType.TOOL_RESULT
+        )
+        total = raw_blocks + result_part_count
+        if total:
             report.warn(
-                f"{raw_blocks} content block(s) with no IR representation "
+                f"{total} content block(s) with no IR representation "
                 f"(e.g. image/document) degrade to a text placeholder in {target}."
             )
 

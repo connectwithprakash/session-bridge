@@ -85,10 +85,11 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
                     call_id=b.get("tool_use_id", ""),
                     text=result if isinstance(result, str) else json.dumps(result),
                     is_error=bool(b.get("is_error", False)),
+                    # Carry non-text parts ON the result (not as sibling blocks),
+                    # so writers never mistake them for a separate turn.
+                    result_parts=tuple(nontext_parts),
                 )
             )
-            for part in nontext_parts:
-                blocks.append(ContentBlock.raw(part, part.get("type")))
         elif bt:
             # Unknown block type (e.g. image, document, server_tool_use). Keep the
             # original block verbatim as a RAW passthrough so a same-harness writer
@@ -159,6 +160,11 @@ def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
                 # so a removal still reduces the pending count rather than being
                 # ignored entirely.
                 queue.pop(0)
+        elif op == "popAll":
+            # Claude Code flushes the ENTIRE pending queue in one op (e.g. all
+            # queued input delivered/cleared at once). Ignoring it would leave
+            # stale items that then mis-consume later dequeues; clear the queue.
+            queue.clear()
     remaining = [item for q in per_session.values() for item in q]
     remaining.sort(key=lambda item: item[0])
     return tuple(content for _, content in remaining)
