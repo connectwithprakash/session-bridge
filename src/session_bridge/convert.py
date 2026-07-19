@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .handshake import build_handshake, handshake_message, strip_prior_handshakes
+from .handshake import (
+    build_handshake,
+    handshake_message,
+    strip_prior_handshakes,
+    stub_open_tool_calls,
+)
 from .ir import ConversionReport, Session
 from .readers.claude_code import read_claude_code
 from .readers.codex import read_codex
@@ -53,11 +58,18 @@ def convert(
     *,
     inject_handshake: bool = True,
     codex_timestamp: Optional[str] = None,
+    stub_open_calls: bool = False,
 ) -> ConversionResult:
     """Convert a session file from ``source`` to ``target``.
 
     When ``inject_handshake`` is set (default), a resume-handshake system message is
     prepended so the target agent resolves pending state before continuing.
+
+    When ``stub_open_calls`` is set, a synthetic interrupted tool_result is appended
+    for each genuinely-open tool call, making the output a valid transcript that a
+    provider will accept on resume (a tool call with no result is a documented 400
+    on OpenAI Responses and rejected by Anthropic). Off by default because it adds
+    a message the source did not contain; the handshake reports the calls either way.
 
     ``codex_timestamp`` (ISO string) stamps a Codex-target session_meta so the
     session isn't dated to the writer's placeholder epoch; the CLI passes the real
@@ -78,9 +90,15 @@ def convert(
     session = strip_prior_handshakes(session)
 
     # Build the report first (from the untouched session) so the handshake text can
-    # cite the real losses, then optionally prepend the handshake message.
+    # cite the real losses (incl. still-open tool calls) before any stubbing.
     _, report = _write(session)
     handshake_text = build_handshake(session, report, target)
+
+    # Optionally append synthetic interrupted results so the output is a valid,
+    # provider-acceptable transcript. Done AFTER building the report/handshake so
+    # both still reflect the real pre-stub open-call state.
+    if stub_open_calls:
+        session = stub_open_tool_calls(session)
 
     to_write = session
     if inject_handshake:

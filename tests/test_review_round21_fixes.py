@@ -34,18 +34,19 @@ def test_trailing_unresolved_call_is_open():
     assert open_tool_calls(msgs) == ("LAST",)
 
 
-def test_errored_then_reissued_is_abandoned_not_open():
-    # A call that received a result (even an error one) and was then reissued
-    # without a new result is treated as ABANDONED, not open — an error result
-    # is a terminal result, and re-running a stale failed call on resume is the
-    # harmful outcome the report exists to avoid. (r22: an errored+reissued call
-    # cannot be distinguished from a genuinely-retrying one, so the safe,
-    # evidence-backed choice is to not instruct a blind re-run.)
-    msgs = (
-        _asst("c1"), _result("c1", is_error=True),
-        _asst("c1"),  # reissue, no later result
+def test_errored_reissue_at_tail_is_open_but_mid_session_is_abandoned():
+    # r23 refinement: distinguish by position of the unresolved reissue.
+    # (a) reissue is the session's FINAL act (nothing after) -> interrupted
+    #     retry, genuinely open.
+    tail = (_asst("c1"), _result("c1", is_error=True), _asst("c1"))
+    assert open_tool_calls(tail) == ("c1",)
+    # (b) reissue is followed by other resolved activity -> the session moved on;
+    #     abandoned, not reported.
+    mid = (
+        _asst("c1"), _result("c1", is_error=True), _asst("c1"),  # reissue
+        _asst("d1"), _result("d1"),  # session moves on and resolves other work
     )
-    assert open_tool_calls(msgs) == ()
+    assert open_tool_calls(mid) == ()
 
 
 def test_never_resolved_earlier_call_stays_open_despite_later_resolution():

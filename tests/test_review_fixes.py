@@ -87,19 +87,29 @@ def test_is_error_not_reported_when_target_is_claude_code():
 
 
 # ---- HIGH 3: reissued call_id semantics ----
-# NOTE: round 1 originally asserted a resolved-then-reissued call reopens.
-# Round 22 superseded that with real-data evidence: a call that already received
-# a result and is then reissued without a new result is an ABANDONED retry, not
-# open — reporting it makes the resume handshake instruct a blind re-run of stale
-# work. So a call that was ever resolved is not reported as open.
+# Evolution: round 1 asserted a resolved-then-reissued call always reopens; round
+# 22 flipped that to always-abandoned; round 23 made it position-precise — a
+# resolved-then-reissued call is open ONLY if the reissue is the tail (interrupted
+# retry); if the session moved on and resolved other work after it, it is abandoned.
 
-def test_resolved_then_reissued_is_not_open():
+def test_resolved_then_reissued_at_tail_is_open():
     msgs = (
         Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),
         Message(role=Role.TOOL, content=(ContentBlock.tool_result("c1", "done"),)),
-        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),  # reissued, no new result
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),  # reissued at tail
     )
-    assert open_tool_calls(msgs) == ()  # abandoned retry, not pending
+    assert open_tool_calls(msgs) == ("c1",)  # interrupted retry
+
+
+def test_resolved_then_reissued_then_superseded_is_abandoned():
+    msgs = (
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),
+        Message(role=Role.TOOL, content=(ContentBlock.tool_result("c1", "done"),)),
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),  # reissued
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("d1", "t", {}),)),
+        Message(role=Role.TOOL, content=(ContentBlock.tool_result("d1", "ok"),)),  # moved on
+    )
+    assert open_tool_calls(msgs) == ()  # abandoned
 
 
 def test_resolved_call_stays_closed():

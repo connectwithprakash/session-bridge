@@ -57,6 +57,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
         args.path,
         inject_handshake=not args.no_handshake,
         codex_timestamp=codex_ts,
+        stub_open_calls=args.stub_open_calls,
     )
     out = args.output or (Path(args.path).with_suffix("").name + f".{args.target}.jsonl")
     dump_jsonl(result.records, out)
@@ -178,6 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
     conv.add_argument("--handshake-out", help="also write the resume handshake to this path")
     conv.add_argument("--no-handshake", action="store_true",
                       help="do not prepend the resume handshake message")
+    conv.add_argument("--stub-open-calls", action="store_true",
+                      help="append a synthetic interrupted tool_result for each "
+                           "still-open tool call, so the output is a valid transcript "
+                           "a provider will accept on resume (a call with no result "
+                           "is a 400 on OpenAI Responses / rejected by Anthropic)")
     conv.add_argument("--place-claude-cwd", metavar="CWD",
                       help="also place the converted session under Claude Code's "
                            "project dir for this cwd, so `claude --resume` finds it "

@@ -13,6 +13,7 @@ This is the "handshake protocol, not just file conversion" the research flagged.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from .ir import BlockType, ContentBlock, ConversionReport, Message, Role, Session
@@ -44,13 +45,48 @@ def strip_prior_handshakes(session: Session) -> Session:
     return session.with_messages(kept)
 
 
-def _open_call_details(session: Session) -> list[tuple[str, str, str]]:
-    """(call_id, tool_name, arguments-preview) for each unresolved call.
+# Synthetic result injected for a tool call left unresolved at the tail. Providers
+# reject a tool call with no matching result (OpenAI Responses "No tool output
+# found for function call" 400; Anthropic requires a tool_result), and harness
+# resume-repair passes do NOT stub it. The industry-standard fix is to inject an
+# error tool_result marking the call interrupted, so the transcript is valid AND
+# the model learns the action did not complete.
+INTERRUPTED_RESULT_TEXT = "[session interrupted before this tool call returned]"
 
-    ``pending.open_tool_calls`` is computed positionally (a reissued call_id that
-    was resolved once then reissued is open again). Pick the LAST issuing block
-    per open id so a reissued call shows its current args, not the resolved
-    earlier occurrence.
+
+def stub_open_tool_calls(session: Session) -> Session:
+    """Append a synthetic error tool_result for every genuinely-open tool call,
+    so the resumed session is a valid transcript (no orphaned tool call) and the
+    model sees the call as failed/interrupted rather than crashing the provider.
+
+    Appends one TOOL message carrying the stub results, only for call_ids in
+    ``pending.open_tool_calls`` (tail-outstanding, never resolved). No-op when
+    there are none. Pending state is cleared for those calls since they are now
+    resolved (as interrupted)."""
+    open_ids = session.pending.open_tool_calls
+    if not open_ids:
+        return session
+    stub = Message(
+        role=Role.TOOL,
+        content=tuple(
+            ContentBlock.tool_result(cid, INTERRUPTED_RESULT_TEXT, is_error=True)
+            for cid in open_ids
+        ),
+    )
+    new_pending = replace(session.pending, open_tool_calls=())
+    return replace(
+        session,
+        messages=session.messages + (stub,),
+        pending=new_pending,
+    )
+
+
+def _open_call_details(session: Session) -> list[tuple[str, str, str]]:
+    """(call_id, tool_name, arguments-preview) for each genuinely-open call.
+
+    ``pending.open_tool_calls`` (see readers/_pending.py) already scopes which
+    call_ids are genuinely open. Here, pick the LAST issuing block per open id so
+    a reissued/interrupted call shows its current args, not an earlier occurrence.
     """
     open_ids = set(session.pending.open_tool_calls)
     last_block: dict[str, Any] = {}

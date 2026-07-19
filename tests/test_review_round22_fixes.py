@@ -40,6 +40,20 @@ def test_no_result_call_warned_as_resume_risk():
     assert any("no matching result" in w for w in report.warnings)
 
 
+def test_case7_third_retry_interrupted_is_open():
+    # r23 (found latent by r23 reviewer A): resolved, reissued+resolved, reissued a
+    # THIRD time and the session stopped -> the final retry is genuinely open, not
+    # hidden by the earlier resolutions.
+    msgs = (
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "E", {}),)),
+        Message(role=Role.TOOL, content=(ContentBlock.tool_result("c1", "r1"),)),
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "E", {}),)),
+        Message(role=Role.TOOL, content=(ContentBlock.tool_result("c1", "r2"),)),
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "E", {}),)),  # 3rd, unresolved, tail
+    )
+    assert open_tool_calls(msgs) == ("c1",)
+
+
 def test_fully_resolved_no_resume_risk_warning():
     s = Session(
         meta=SessionMeta(source_harness="claude-code", model="m"),

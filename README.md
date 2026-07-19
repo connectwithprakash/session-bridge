@@ -70,6 +70,14 @@ session-bridge convert --from hermes --to claude-code SESSION.jsonl \
 Conversion notes (lossy asymmetries) are printed to stderr; the handshake is
 prepended to the output by default (use `--no-handshake` to disable).
 
+If the source stopped mid-turn with a tool call that never returned, that call
+has no result, and a provider rejects a tool call with no matching result on the
+next turn (OpenAI Responses returns a 400; Anthropic requires a `tool_result`).
+Pass `--stub-open-calls` to append a synthetic interrupted result
+(`[session interrupted...]`, marked as an error) for each genuinely-open call, so
+the converted transcript is valid to resume; the report still discloses that the
+call was interrupted.
+
 ## What transfers, and what doesn't
 
 The conversation core (user/assistant text, reasoning summaries, tool calls,
