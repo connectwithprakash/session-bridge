@@ -25,8 +25,12 @@ from session_bridge.writers.hermes_db import register_hermes_session
 # ---- CRITICAL: is_error survives a multi-hop round trip ----
 
 def test_recover_tool_error_helper():
-    assert recover_tool_error("[tool error] boom") == ("boom", True)
+    from session_bridge.ir import ERROR_MARKER
+    assert recover_tool_error(ERROR_MARKER + "boom") == ("boom", True)
     assert recover_tool_error("fine") == ("fine", False)
+    # a bare human-readable prefix (real tool output) is NOT a bridge marker
+    assert recover_tool_error("[tool error] real linter output") == (
+        "[tool error] real linter output", False)
 
 
 def test_is_error_survives_codex_round_trip(tmp_path):

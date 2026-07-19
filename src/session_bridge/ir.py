@@ -28,14 +28,21 @@ UNSUPPORTED_BLOCK_MARKER = "[unsupported "
 # Prefix a writer prepends to a failed tool result when the target format has no
 # native error flag (Codex / Hermes). Readers recover is_error from it so a
 # failure survives a multi-hop round trip instead of reading back as success.
-ERROR_MARKER = "[tool error] "
+# The token is deliberately unforgeable (like HANDSHAKE_MARKER) so that genuine
+# tool output which merely starts with "[tool error]" is NOT mistaken for a
+# bridge-inserted failure marker. The human-readable prefix follows the token so
+# the result still reads naturally.
+ERROR_MARKER_TOKEN = "<!-- session-bridge:tool-error -->"
+ERROR_MARKER = ERROR_MARKER_TOKEN + "[tool error] "
 
 
 def recover_tool_error(text: str) -> tuple[str, bool]:
-    """If ``text`` carries the ERROR_MARKER prefix, strip it and report an error.
+    """If ``text`` carries the error marker, strip it and report an error.
 
     Lets a reader reconstruct ``is_error`` for a result whose failure was baked
-    into text by a prior hop's writer (the target had no native error flag)."""
+    into text by a prior hop's writer (the target had no native error flag).
+    Matches only the unforgeable token, so genuine output beginning with
+    '[tool error]' is not misclassified."""
     if text.startswith(ERROR_MARKER):
         return text[len(ERROR_MARKER):], True
     return text, False

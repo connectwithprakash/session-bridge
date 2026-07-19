@@ -81,6 +81,7 @@ def read_codex(path: str | Path) -> Session:
 
     meta = SessionMeta(source_harness="codex", model_provider="openai")
     messages: list[Message] = []
+    turn_models: set[str] = set()
 
     for rec in records:
         rtype = rec.get("type")
@@ -101,9 +102,14 @@ def read_codex(path: str | Path) -> Session:
                 version=payload.get("cli_version"),
             )
         elif rtype == "turn_context":
-            # Model and approval policy live here; keep the first seen.
+            # Model and approval policy live here; keep the first seen. Also record
+            # every distinct per-turn model so a mid-session model switch (Codex's
+            # per-turn mechanism) can be reported as lossy — the IR keeps only one
+            # session model.
             from dataclasses import replace
 
+            if payload.get("model"):
+                turn_models.add(payload["model"])
             updates: dict[str, Any] = {}
             if not meta.model and payload.get("model"):
                 updates["model"] = payload["model"]
@@ -183,6 +189,11 @@ def read_codex(path: str | Path) -> Session:
                     )
                 )
         # event_msg intentionally ignored (duplicates response_item content)
+
+    if len(turn_models) > 1:
+        from dataclasses import replace
+
+        meta = replace(meta, extra={**meta.extra, "turn_models": sorted(turn_models)})
 
     msgs = tuple(messages)
     pending = PendingState(open_tool_calls=open_tool_calls(msgs))

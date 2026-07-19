@@ -99,18 +99,21 @@ def report_losses(session: Session, target: str) -> ConversionReport:
         if error_results:
             report.warn(
                 f"{error_results} failed tool result(s): {target} has no native error "
-                f"flag; failure is preserved as a '{ERROR_MARKER.strip()}' text prefix only."
+                f"flag; failure is preserved as a '[tool error]' text prefix only."
             )
 
     # 7b. Per-turn model switch: the IR has no per-message model field, so a
     # session that used more than one model collapses to session.meta.model on
-    # write. Detect it from the raw records and report the collapse.
+    # write. Detect it from either Claude Code's per-message raw.message.model or
+    # Codex's per-turn models (recorded by the reader in meta.extra["turn_models"]).
     models_seen = {
         m.raw.get("message", {}).get("model")
         for m in session.messages
         if isinstance(m.raw, dict) and isinstance(m.raw.get("message"), dict)
         and m.raw["message"].get("model")
     }
+    models_seen.update(session.meta.extra.get("turn_models") or [])
+    models_seen.discard(None)
     if len(models_seen) > 1:
         report.warn(
             f"{len(models_seen)} models used across turns "
@@ -133,9 +136,13 @@ def report_losses(session: Session, target: str) -> ConversionReport:
         )
 
     # 9. RAW passthrough blocks (a source block the IR can't type, e.g. an image).
-    # A same-harness writer that can re-emit them loses nothing; any other target
-    # degrades them to a text placeholder, which is lossy and must be reported.
-    if "raw_passthrough" not in caps:
+    # Re-emission is lossless ONLY when writing back to the SAME harness the block
+    # came from (its raw_block is that harness's native shape). A same-named target
+    # that received the block from a different harness cannot render the foreign
+    # shape, so that path is lossy and must be reported. Gate on source==target,
+    # not on the target capability alone.
+    lossless_raw = "raw_passthrough" in caps and src == target
+    if not lossless_raw:
         raw_blocks = sum(
             1 for m in session.messages for b in m.content if b.type is BlockType.RAW
         )

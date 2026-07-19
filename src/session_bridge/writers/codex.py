@@ -75,24 +75,31 @@ def write_codex(
 
     for msg in session.messages:
         ts = msg.timestamp
-        # Accumulate all TEXT/RAW blocks into ONE message payload per IR message.
-        # Emitting one message record per block would inflate the turn count on
-        # read-back (a common "assistant text then tool_call" turn would become
-        # two turns), so join them like the Hermes writers do.
-        text_parts = [
-            b.text or ""
-            for b in msg.content
-            if b.type in (BlockType.TEXT, BlockType.RAW)
-        ]
+        role = _codex_role(msg.role)
         emitted = False
-        if text_parts:
-            add(_msg_payload(_codex_role(msg.role), "\n".join(text_parts)), ts)
-            emitted = True
+        # Single ordered pass. Coalesce only ADJACENT TEXT/RAW blocks into one
+        # message record (so consecutive text doesn't inflate the turn count) and
+        # flush that buffer when a non-text block interrupts — this preserves the
+        # original block order (e.g. reasoning -> text -> tool_call) instead of
+        # hoisting all text to the front.
+        text_buf: list[str] = []
+
+        def flush_text() -> None:
+            nonlocal emitted
+            if text_buf:
+                add(_msg_payload(role, "\n".join(text_buf)), ts)
+                text_buf.clear()
+                emitted = True
+
         for b in msg.content:
-            if b.type is BlockType.REASONING:
+            if b.type is BlockType.TEXT or b.type is BlockType.RAW:
+                text_buf.append(b.text or "")
+            elif b.type is BlockType.REASONING:
+                flush_text()
                 add({"type": "reasoning", "summary": [{"type": "summary_text", "text": b.text or ""}]}, ts)
                 emitted = True
             elif b.type is BlockType.TOOL_CALL:
+                flush_text()
                 add(
                     {
                         "type": "function_call",
@@ -104,13 +111,15 @@ def write_codex(
                 )
                 emitted = True
             elif b.type is BlockType.TOOL_RESULT:
+                flush_text()
                 output = b.text or ""
                 if b.is_error:
                     output = ERROR_MARKER + output
                 add({"type": "function_call_output", "call_id": b.call_id, "output": output}, ts)
                 emitted = True
+        flush_text()
         # Preserve an otherwise-empty message so message count survives the round trip.
         if not emitted and msg.role in (Role.USER, Role.ASSISTANT, Role.SYSTEM):
-            add(_msg_payload(_codex_role(msg.role), ""), ts)
+            add(_msg_payload(role, ""), ts)
 
     return records, report
