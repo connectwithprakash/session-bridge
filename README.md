@@ -86,6 +86,26 @@ The following are **inherently lossy** and are reported per conversion (see
 6. **Permission/sandbox posture:** richest in Codex, absent in Hermes.
 7. **Per-turn model switches:** Hermes stores a single session model.
 
+## Getting a converted session recognized by the target
+
+session-bridge produces a valid target-format transcript, but current harness
+versions do **not** discover a session from its transcript file alone. Both index
+sessions through a private store:
+
+| Harness | Transcript location | Resume index (the actual key) |
+|---|---|---|
+| Claude Code (2.1.x) | `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` | `~/.claude/sessions/` + `~/.claude/history.jsonl` |
+| Hermes | `~/.hermes/sessions/<ts>_<id>.jsonl` | SQLite session store |
+
+Verified on real installs: dropping a converted `.jsonl` into the transcript
+directory does not make it appear in `claude --resume` or `hermes sessions list`.
+So the converted transcript is correct and complete, but wiring it into a live
+harness's resume flow needs a per-harness registration step (write the index
+/ store entry) that this tool does not yet perform. Until then, the transcript
+and its handshake are usable for reading, diffing, and manual paste-in; automatic
+`--resume` recognition is future work. Codex was not tested (no API credit at
+time of writing).
+
 ## Known limitations
 
 - Codex tool-call records (`function_call` / `function_call_output`) are handled
