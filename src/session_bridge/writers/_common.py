@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from ..ir import (
     ERROR_MARKER,  # re-exported for writers that import it from here
+    PLACEHOLDER_MODELS,
     UNSUPPORTED_BLOCK_MARKER,
     BlockType,
     ConversionReport,
@@ -114,12 +115,30 @@ def report_losses(session: Session, target: str) -> ConversionReport:
     }
     models_seen.update(session.meta.extra.get("turn_models") or [])
     models_seen.discard(None)
+    # Placeholder ids (e.g. Claude Code's "<synthetic>") are not real models;
+    # don't count them as a distinct model in the switch check.
+    models_seen -= PLACEHOLDER_MODELS
     if len(models_seen) > 1:
         report.warn(
             f"{len(models_seen)} models used across turns "
             f"({', '.join(sorted(str(x) for x in models_seen))}); the IR keeps only one "
             f"session model, so per-turn model attribution is lost."
         )
+    # If the reader found no real model (only placeholders / none), the target's
+    # model field will be empty — warn so resume-model selection isn't silently
+    # wrong (a resume target routes inference by this field).
+    if not session.meta.model and not models_seen:
+        raw_models = {
+            m.raw.get("message", {}).get("model")
+            for m in session.messages
+            if isinstance(m.raw, dict) and isinstance(m.raw.get("message"), dict)
+        }
+        if raw_models & PLACEHOLDER_MODELS:
+            report.warn(
+                "no real model id recorded (source only had a placeholder such as "
+                "'<synthetic>'); the target session has no routable model and resume "
+                "will need one supplied."
+            )
 
     # 6. Permission posture erased by Hermes.
     if session.meta.permission_mode and "permission" not in caps:

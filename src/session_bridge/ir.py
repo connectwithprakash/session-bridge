@@ -35,6 +35,12 @@ UNSUPPORTED_BLOCK_MARKER = "[unsupported "
 ERROR_MARKER_TOKEN = "<!-- session-bridge:tool-error -->"
 ERROR_MARKER = ERROR_MARKER_TOKEN + "[tool error] "
 
+# Model ids a harness stamps on locally-synthesized (non-completion) messages —
+# e.g. Claude Code's "<synthetic>" on an auth-error notice. Not real, routable
+# model ids; readers must not adopt them as the session model and the loss
+# reporter must not count them as a real model.
+PLACEHOLDER_MODELS = frozenset({"<synthetic>"})
+
 
 def recover_tool_error(text: str) -> tuple[str, bool]:
     """If ``text`` carries the error marker, strip it and report an error.

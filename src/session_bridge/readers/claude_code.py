@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..ir import (
+    PLACEHOLDER_MODELS,
     ContentBlock,
     Message,
     PendingState,
@@ -99,14 +100,27 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
     return tuple(blocks)
 
 
+def _real_model(value: Any) -> Optional[str]:
+    """Return the model id only if it is a real (routable) one, else None.
+
+    Filters harness placeholders (e.g. Claude Code's "<synthetic>") so they don't
+    become the session model."""
+    if isinstance(value, str) and value and value not in PLACEHOLDER_MODELS:
+        return value
+    return None
+
+
 def _extract_meta(record: dict[str, Any], base: SessionMeta) -> SessionMeta:
     """Fill session meta from the first message record that carries it."""
     msg = record.get("message", {})
+    rec_model = _real_model(msg.get("model")) if isinstance(msg, dict) else None
     return SessionMeta(
         source_harness="claude-code",
         session_id=base.session_id or record.get("sessionId"),
         cwd=base.cwd or record.get("cwd"),
-        model=base.model or (msg.get("model") if isinstance(msg, dict) else None),
+        # Prefer the first REAL model; ignore synthetic placeholders even if they
+        # appear first in file order.
+        model=base.model or rec_model,
         model_provider="anthropic",
         permission_mode=base.permission_mode or record.get("permissionMode"),
         version=base.version or record.get("version"),
