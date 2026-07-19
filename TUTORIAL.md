@@ -61,8 +61,12 @@ Read the `pending state` block at the bottom:
 
 - `open tool calls: []` and `queued user input: 0` mean it stopped cleanly, so
   resuming is straightforward.
-- Anything non-empty means the source stopped mid-turn. The conversion carries
-  those forward in the handshake (step 4) so nothing is silently lost.
+- Anything non-empty means the source stopped mid-turn with that state
+  outstanding at the tail: a tool call issued but never answered, or input
+  queued but never delivered. Only trailing-unresolved calls count; an
+  errored-then-abandoned call from deep in a long session (where the session
+  later moved on and ended cleanly) is not reported. The handshake (step 4)
+  carries the genuinely-outstanding state forward.
 
 ---
 
