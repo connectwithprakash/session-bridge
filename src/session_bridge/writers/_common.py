@@ -232,6 +232,26 @@ def report_losses(session: Session, target: str) -> ConversionReport:
     return report
 
 
+def tool_result_text(block) -> str:
+    """Text a cross-harness writer should emit for a TOOL_RESULT block.
+
+    A tool_result whose original content was non-text (e.g. an image, tool
+    references) has empty ``text`` and its parts on ``result_parts``. Those
+    targets cannot render the parts, so emit a visible placeholder describing
+    them — matching the loss the ConversionReport already warns about — instead
+    of a bare empty string that reads as 'the tool returned nothing'.
+    """
+    text = block.text or ""
+    if text or not block.result_parts:
+        return text
+    kinds: dict[str, int] = {}
+    for p in block.result_parts:
+        k = p.get("type", "part") if isinstance(p, dict) else "part"
+        kinds[k] = kinds.get(k, 0) + 1
+    summary = ", ".join(f"{n} {k}" for k, n in kinds.items())
+    return f"{UNSUPPORTED_BLOCK_MARKER}non-text tool result: {summary}]"
+
+
 def reconstruct_tool_schemas(session: Session) -> tuple[ToolSchema, ...]:
     """When a target needs a tool catalog but the source had none, synthesize a
     minimal catalog from the tool names actually invoked (no parameter schemas)."""

@@ -12,7 +12,7 @@ import json
 from typing import Any
 
 from ..ir import BlockType, ConversionReport, Role, Session
-from ._common import ERROR_MARKER, report_losses
+from ._common import ERROR_MARKER, report_losses, tool_result_text
 
 
 _ROLE_TO_CODEX = {Role.USER: "user", Role.ASSISTANT: "assistant", Role.SYSTEM: "system"}
@@ -112,7 +112,7 @@ def write_codex(
                 emitted = True
             elif b.type is BlockType.TOOL_RESULT:
                 flush_text()
-                output = b.text or ""
+                output = tool_result_text(b)  # placeholder for parts-only results
                 if b.is_error:
                     output = ERROR_MARKER + output
                 add({"type": "function_call_output", "call_id": b.call_id, "output": output}, ts)

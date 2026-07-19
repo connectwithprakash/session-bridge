@@ -12,11 +12,16 @@ import json
 from typing import Any
 
 from ..ir import BlockType, ConversionReport, ContentBlock, Message, Role, Session
-from ._common import ERROR_MARKER, reconstruct_tool_schemas, report_losses
+from ._common import (
+    ERROR_MARKER,
+    reconstruct_tool_schemas,
+    report_losses,
+    tool_result_text,
+)
 
 
 def _tool_record(block: ContentBlock, timestamp: Any) -> dict[str, Any]:
-    content = block.text or ""
+    content = tool_result_text(block)  # placeholder for parts-only results
     if block.is_error:
         content = ERROR_MARKER + content
     return {

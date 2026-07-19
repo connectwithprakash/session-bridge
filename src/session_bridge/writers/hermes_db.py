@@ -35,7 +35,7 @@ import sqlite3
 from typing import Any, Optional
 
 from ..ir import BlockType, Message, Role, Session
-from ._common import ERROR_MARKER
+from ._common import ERROR_MARKER, tool_result_text
 
 _ROLE_TO_DB = {
     Role.USER: "user",
@@ -134,7 +134,7 @@ def _message_rows(
         # sequence mirrors the source block order.
         pending: list[tuple[int, dict[str, Any]]] = []
         for pos, b in result_blocks:
-            content = b.text or ""
+            content = tool_result_text(b)  # placeholder for parts-only results
             if b.is_error:
                 content = ERROR_MARKER + content
             pending.append((pos, {
