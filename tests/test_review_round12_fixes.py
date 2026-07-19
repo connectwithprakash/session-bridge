@@ -61,7 +61,8 @@ def test_image_tool_result_loss_reported_cross_harness(tmp_path):
 
 
 def test_mixed_text_and_image_tool_result(tmp_path):
-    # text + image in one tool_result: text goes to the result, image to RAW
+    # text + image in one tool_result: text is the result text, image is carried
+    # on the result via result_parts (not a sibling RAW block)
     f = tmp_path / "s.jsonl"
     f.write_text(
         json.dumps({

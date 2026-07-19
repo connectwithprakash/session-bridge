@@ -5,17 +5,29 @@ removed item was falsely reported as still-pending queued input."""
 from session_bridge.readers.claude_code import _queued_messages
 
 
-def test_remove_consumes_matching_queue_entry():
-    # enqueue then remove the SAME content -> nothing pending
+def test_remove_content_less_withdraws_the_newest(tmp_path=None):
+    # Real Claude Code 'remove' records carry NO content and immediately follow
+    # their own enqueue -> they withdraw the most-recently-enqueued pending item.
     records = [
         {"type": "queue-operation", "operation": "enqueue", "sessionId": "s", "content": "notif-A"},
-        {"type": "queue-operation", "operation": "remove", "sessionId": "s", "content": "notif-A"},
+        {"type": "queue-operation", "operation": "remove", "sessionId": "s"},  # no content
     ]
     assert _queued_messages(records) == ()
 
 
-def test_remove_matches_by_content_not_position():
-    # two enqueues, remove the FIRST by content -> only the second remains
+def test_remove_pops_newest_when_queue_has_multiple():
+    # older user input enqueued, then a notification enqueued and immediately
+    # removed -> the older user input must remain (the bug popped it instead).
+    records = [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "s", "content": "older user input"},
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "s", "content": "notification"},
+        {"type": "queue-operation", "operation": "remove", "sessionId": "s"},  # withdraws newest
+    ]
+    assert _queued_messages(records) == ("older user input",)
+
+
+def test_remove_honors_content_match_when_present():
+    # defensive: if a remove DOES carry content, an exact match wins over LIFO
     records = [
         {"type": "queue-operation", "operation": "enqueue", "sessionId": "s", "content": "first"},
         {"type": "queue-operation", "operation": "enqueue", "sessionId": "s", "content": "second"},
@@ -25,7 +37,6 @@ def test_remove_matches_by_content_not_position():
 
 
 def test_genuinely_pending_still_reported():
-    # enqueue with no remove/dequeue -> still pending (regression guard)
     records = [
         {"type": "queue-operation", "operation": "enqueue", "sessionId": "s", "content": "real pending"},
     ]
@@ -33,14 +44,13 @@ def test_genuinely_pending_still_reported():
 
 
 def test_remove_scoped_per_session():
-    # a remove in session B must not consume session A's identical-content item
+    # a content-less remove in session B must not consume session A's item
     records = [
-        {"type": "queue-operation", "operation": "enqueue", "sessionId": "A", "content": "x"},
-        {"type": "queue-operation", "operation": "enqueue", "sessionId": "B", "content": "x"},
-        {"type": "queue-operation", "operation": "remove", "sessionId": "B", "content": "x"},
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "A", "content": "keep"},
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "B", "content": "drop"},
+        {"type": "queue-operation", "operation": "remove", "sessionId": "B"},
     ]
-    # A's "x" still pending, B's removed
-    assert _queued_messages(records) == ("x",)
+    assert _queued_messages(records) == ("keep",)
 
 
 def test_dequeue_still_works():
