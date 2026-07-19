@@ -107,9 +107,18 @@ def cmd_register(args: argparse.Namespace) -> int:
     import uuid
 
     from ._ids import UnsafeSessionIdError, validate_session_id
+    from .writers._common import report_losses
     from .writers.hermes_db import HermesRegistrationError, register_hermes_session
 
     session = read_session(args.source, args.path)
+
+    # Surface conversion losses on the register path too (previously silent):
+    # e.g. orphaned tool calls that break resume, dropped tool schemas, etc.
+    reg_report = report_losses(session, "hermes")
+    if reg_report.warnings:
+        print(f"\n{len(reg_report.warnings)} conversion note(s):", file=sys.stderr)
+        for w in reg_report.warnings:
+            print(f"  - {w}", file=sys.stderr)
 
     db_path = args.db or os.path.expanduser("~/.hermes/state.db")
     if not os.path.exists(db_path):

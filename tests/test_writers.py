@@ -116,5 +116,7 @@ def test_to_codex_warns_when_no_system_instructions(tmp_path):
 def test_to_hermes_warns_when_source_has_open_tool_call(tmp_path):
     src = read_claude_code(FIXTURES / "claude_pending.jsonl")
     _, report = write_hermes(src)
-    assert any("open tool call" in w.lower() or "pending" in w.lower()
+    # an unresolved tool call is flagged as a resume risk (reworded r22)
+    assert any("no matching result" in w.lower() or "open tool call" in w.lower()
+               or "pending" in w.lower()
                for w in report.warnings)

@@ -147,11 +147,18 @@ def report_losses(session: Session, target: str) -> ConversionReport:
             f"representable in {target} and is erased."
         )
 
-    # 8/pending. Open tool calls need a handshake, not a plain transcript.
+    # 8. Tool calls with no matching result anywhere in the source (a gap in the
+    # original transcript — either a genuinely-interrupted turn or a pre-existing
+    # dropped result). Providers reject a tool_calls entry with no matching result
+    # on the next turn, and Hermes's resume-repair does not stub it, so this breaks
+    # `--resume`. `pending.open_tool_calls` already computes exactly this set
+    # (never-resolved, tail-outstanding); report it as a first-class loss so the
+    # operator knows before relying on a converted/registered session.
     if session.pending.open_tool_calls:
         report.warn(
-            f"{len(session.pending.open_tool_calls)} open tool call(s) with no result; "
-            f"resume requires the handshake preamble to satisfy or abandon them."
+            f"{len(session.pending.open_tool_calls)} tool call(s) have no matching "
+            f"result; a resumed session may be rejected by the provider until these "
+            f"are satisfied or removed (surfaced in the handshake for convert)."
         )
 
     # 9. RAW passthrough blocks (a source block the IR can't type, e.g. an image).

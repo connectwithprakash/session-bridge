@@ -34,13 +34,25 @@ def test_trailing_unresolved_call_is_open():
     assert open_tool_calls(msgs) == ("LAST",)
 
 
-def test_trailing_errored_reissue_is_open():
-    # if the abandoned-looking reissue IS the tail (no later result), it's open
+def test_errored_then_reissued_is_abandoned_not_open():
+    # A call that received a result (even an error one) and was then reissued
+    # without a new result is treated as ABANDONED, not open — an error result
+    # is a terminal result, and re-running a stale failed call on resume is the
+    # harmful outcome the report exists to avoid. (r22: an errored+reissued call
+    # cannot be distinguished from a genuinely-retrying one, so the safe,
+    # evidence-backed choice is to not instruct a blind re-run.)
     msgs = (
         _asst("c1"), _result("c1", is_error=True),
-        _asst("c1"),  # reissue at the tail, nothing after
+        _asst("c1"),  # reissue, no later result
     )
-    assert open_tool_calls(msgs) == ("c1",)
+    assert open_tool_calls(msgs) == ()
+
+
+def test_never_resolved_earlier_call_stays_open_despite_later_resolution():
+    # r22 regression: A issued, B issued, only B resolves, session ends. A never
+    # got any result -> genuinely open, must NOT be hidden by B's resolution.
+    msgs = (_asst("A"), _asst("B"), _result("B"))
+    assert open_tool_calls(msgs) == ("A",)
 
 
 def test_no_results_at_all_all_open():

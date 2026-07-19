@@ -86,15 +86,20 @@ def test_is_error_not_reported_when_target_is_claude_code():
     assert not any("failed tool result" in w.lower() for w in report.warnings)
 
 
-# ---- HIGH 3: reissued call_id must reopen ----
+# ---- HIGH 3: reissued call_id semantics ----
+# NOTE: round 1 originally asserted a resolved-then-reissued call reopens.
+# Round 22 superseded that with real-data evidence: a call that already received
+# a result and is then reissued without a new result is an ABANDONED retry, not
+# open — reporting it makes the resume handshake instruct a blind re-run of stale
+# work. So a call that was ever resolved is not reported as open.
 
-def test_reissued_call_id_is_open():
+def test_resolved_then_reissued_is_not_open():
     msgs = (
         Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),
         Message(role=Role.TOOL, content=(ContentBlock.tool_result("c1", "done"),)),
-        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),  # reissued, unresolved
+        Message(role=Role.ASSISTANT, content=(ContentBlock.tool_call("c1", "t", {}),)),  # reissued, no new result
     )
-    assert open_tool_calls(msgs) == ("c1",)
+    assert open_tool_calls(msgs) == ()  # abandoned retry, not pending
 
 
 def test_resolved_call_stays_closed():
