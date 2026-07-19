@@ -97,7 +97,13 @@ def _extract_meta(record: dict[str, Any], base: SessionMeta) -> SessionMeta:
         model_provider="anthropic",
         permission_mode=base.permission_mode or record.get("permissionMode"),
         version=base.version or record.get("version"),
-        extra={"gitBranch": record.get("gitBranch")} if record.get("gitBranch") else {},
+        # Keep the first branch seen; don't let a later record without gitBranch
+        # clobber it (first-non-null-wins, matching the other meta fields).
+        extra=(
+            base.extra
+            if base.extra.get("gitBranch")
+            else ({"gitBranch": record.get("gitBranch")} if record.get("gitBranch") else base.extra)
+        ),
     )
 
 

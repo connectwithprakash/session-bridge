@@ -25,6 +25,7 @@ from ..ir import (
     SessionMeta,
     ToolSchema,
 )
+from ._content import content_blocks
 from ._jsonl import load_records
 from ._pending import open_tool_calls
 
@@ -61,32 +62,13 @@ def _parse_arguments(raw_args: Any) -> dict[str, Any]:
     return {}
 
 
-def _content_to_text(content: Any) -> str:
-    """Normalize an OpenAI-style ``content`` to text.
-
-    Content may be a plain string or a list of parts (multi-modal), e.g.
-    ``[{"type": "text", "text": "hi"}, {"type": "image_url", ...}]``. Join the
-    textual parts; non-text parts (images) have no text and are skipped.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for p in content:
-            if isinstance(p, dict) and isinstance(p.get("text"), str):
-                parts.append(p["text"])
-        return "\n".join(parts)
-    return ""
-
-
 def _assistant_blocks(record: dict[str, Any]) -> tuple[ContentBlock, ...]:
     blocks: list[ContentBlock] = []
     reasoning = record.get("reasoning")
     if isinstance(reasoning, str) and reasoning.strip():
         blocks.append(ContentBlock.reasoning(reasoning))
-    content = _content_to_text(record.get("content"))
-    if content.strip():
-        blocks.append(ContentBlock.text_block(content))
+    # Text parts -> TEXT, non-text parts -> RAW passthrough (not dropped).
+    blocks.extend(content_blocks(record.get("content")))
     for call in record.get("tool_calls") or []:
         if not isinstance(call, dict):
             continue
@@ -121,8 +103,8 @@ def read_hermes(path: str | Path) -> Session:
             )
             tools = _parse_tool_schemas(rec.get("tools"))
         elif role == "user":
-            content = _content_to_text(rec.get("content"))
-            blocks = (ContentBlock.text_block(content),) if content else ()
+            # Text parts -> TEXT, non-text parts (image_url, ...) -> RAW passthrough.
+            blocks = content_blocks(rec.get("content"))
             messages.append(
                 Message(
                     role=Role.USER,
@@ -136,6 +118,18 @@ def read_hermes(path: str | Path) -> Session:
                 Message(
                     role=Role.ASSISTANT,
                     content=_assistant_blocks(rec),
+                    timestamp=rec.get("timestamp"),
+                    raw=rec,
+                )
+            )
+        elif role == "system":
+            # write_hermes emits SYSTEM messages (e.g. the injected handshake) as
+            # role:system; read them back rather than dropping the whole class.
+            blocks = content_blocks(rec.get("content"))
+            messages.append(
+                Message(
+                    role=Role.SYSTEM,
+                    content=blocks,
                     timestamp=rec.get("timestamp"),
                     raw=rec,
                 )

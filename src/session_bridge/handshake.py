@@ -17,17 +17,22 @@ from typing import Any
 
 from .ir import BlockType, ContentBlock, ConversionReport, Message, Role, Session
 
-# Stable first line of every handshake, used to detect and strip a handshake that
-# a prior conversion hop injected (so multi-hop conversions don't accumulate them).
 HANDSHAKE_TITLE = "# Session resume handshake"
+
+# An unforgeable marker embedded in every handshake body. Detection matches on
+# THIS, not the human-readable title: a real user message could legitimately
+# start with the title (e.g. someone quoting a prior handshake), and stripping it
+# would silently delete real content. The HTML comment is invisible in rendered
+# Markdown and vanishingly unlikely to appear by coincidence in genuine input.
+HANDSHAKE_MARKER = "<!-- session-bridge:handshake -->"
 
 
 def is_handshake_message(message: Message) -> bool:
-    # Match on the title text, not the role: a handshake injected as SYSTEM can
-    # round-trip back as USER (Claude Code has no system record type and folds
-    # system into a user record), so role is unreliable but the title is stable.
+    # Match on the embedded marker, not the title text or the role: role is
+    # unreliable (SYSTEM can round-trip back as USER once a writer folds it) and
+    # the title alone collides with legitimate user prose.
     return any(
-        b.type is BlockType.TEXT and (b.text or "").lstrip().startswith(HANDSHAKE_TITLE)
+        b.type is BlockType.TEXT and HANDSHAKE_MARKER in (b.text or "")
         for b in message.content
     )
 
@@ -68,6 +73,7 @@ def build_handshake(session: Session, report: ConversionReport, target: str) -> 
     """Render a human+agent readable resume preamble in Markdown."""
     src = session.meta.source_harness
     lines: list[str] = []
+    lines.append(HANDSHAKE_MARKER)
     lines.append(HANDSHAKE_TITLE)
     lines.append("")
     lines.append(f"This session was exported from **{src}** and resumed in **{target}** "

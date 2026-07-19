@@ -30,9 +30,12 @@ def _assistant_content(msg: Message) -> list[dict[str, Any]]:
             blocks.append(
                 {"type": "tool_use", "id": b.call_id, "name": b.tool_name, "input": b.tool_input or {}}
             )
-        elif b.type is BlockType.RAW and b.raw_block is not None:
-            # Re-emit the original block verbatim (lossless same-harness passthrough).
-            blocks.append(b.raw_block)
+        elif b.type is BlockType.RAW:
+            # Re-emit the original block verbatim (lossless same-harness
+            # passthrough); if it lacks the original, degrade to a text placeholder
+            # rather than dropping it silently.
+            blocks.append(b.raw_block if b.raw_block is not None
+                          else {"type": "text", "text": b.text or ""})
     return blocks
 
 
@@ -57,8 +60,9 @@ def _user_content(msg: Message) -> Any:
                     "is_error": b.is_error,
                 }
             )
-        elif b.type is BlockType.RAW and b.raw_block is not None:
-            blocks.append(b.raw_block)
+        elif b.type is BlockType.RAW:
+            blocks.append(b.raw_block if b.raw_block is not None
+                          else {"type": "text", "text": b.text or ""})
     return blocks
 
 
@@ -99,7 +103,7 @@ def write_claude_code(session: Session) -> tuple[list[dict[str, Any]], Conversio
         elif msg.role is Role.SYSTEM:
             # Claude Code has no persisted system record; fold into a user note.
             rtype = "user"
-            message = {"role": "user", "content": msg.text()}
+            message = {"role": "user", "content": msg.display_text()}
         else:
             continue
 

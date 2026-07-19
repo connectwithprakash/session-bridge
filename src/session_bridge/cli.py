@@ -43,11 +43,20 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def cmd_convert(args: argparse.Namespace) -> int:
+    import time
+
+    # Stamp Codex output with the real current time so the session isn't dated to
+    # the writer's placeholder epoch (which can hide it from Codex's recency sort).
+    codex_ts = None
+    if args.target == "codex":
+        codex_ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
     result = convert(
         args.source,
         args.target,
         args.path,
         inject_handshake=not args.no_handshake,
+        codex_timestamp=codex_ts,
     )
     out = args.output or (Path(args.path).with_suffix("").name + f".{args.target}.jsonl")
     dump_jsonl(result.records, out)
@@ -189,7 +198,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (FileNotFoundError, IsADirectoryError, PermissionError) as exc:
+        # Clean error for common filesystem failures instead of a raw traceback,
+        # matching the handling for other error classes in the commands.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except UnicodeDecodeError as exc:
+        print(f"error: file is not valid UTF-8: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

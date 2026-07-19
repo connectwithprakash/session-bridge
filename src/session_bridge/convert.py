@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .handshake import build_handshake, handshake_message, strip_prior_handshakes
 from .ir import ConversionReport, Session
@@ -52,14 +52,24 @@ def convert(
     path: str | Path,
     *,
     inject_handshake: bool = True,
+    codex_timestamp: Optional[str] = None,
 ) -> ConversionResult:
     """Convert a session file from ``source`` to ``target``.
 
     When ``inject_handshake`` is set (default), a resume-handshake system message is
     prepended so the target agent resolves pending state before continuing.
+
+    ``codex_timestamp`` (ISO string) stamps a Codex-target session_meta so the
+    session isn't dated to the writer's placeholder epoch; the CLI passes the real
+    current time (scripts can't call the clock). Ignored for other targets.
     """
     if target not in WRITERS:
         raise ValueError(f"unknown target harness '{target}'; choose from {HARNESSES}")
+
+    def _write(sess: Session):
+        if target == "codex" and codex_timestamp is not None:
+            return WRITERS[target](sess, timestamp=codex_timestamp)
+        return WRITERS[target](sess)
 
     session = read_session(source, path)
     # Strip any handshake a previous conversion hop injected, so multi-hop
@@ -69,7 +79,7 @@ def convert(
 
     # Build the report first (from the untouched session) so the handshake text can
     # cite the real losses, then optionally prepend the handshake message.
-    _, report = WRITERS[target](session)
+    _, report = _write(session)
     handshake_text = build_handshake(session, report, target)
 
     to_write = session
@@ -77,7 +87,7 @@ def convert(
         hs = handshake_message(session, report, target)
         to_write = session.with_messages((hs,) + session.messages)
 
-    records, _ = WRITERS[target](to_write)
+    records, _ = _write(to_write)
     return ConversionResult(
         session=session, records=records, report=report, handshake=handshake_text
     )

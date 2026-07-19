@@ -15,6 +15,7 @@ Design rules:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Optional
@@ -74,7 +75,7 @@ class ContentBlock:
         return ContentBlock(
             type=BlockType.RAW,
             text=f"{UNSUPPORTED_BLOCK_MARKER}{raw_kind} block]",
-            raw_block=dict(raw_block),
+            raw_block=copy.deepcopy(raw_block),
             raw_kind=raw_kind,
         )
 
@@ -88,7 +89,7 @@ class ContentBlock:
             type=BlockType.TOOL_CALL,
             call_id=call_id,
             tool_name=tool_name,
-            tool_input=dict(tool_input),
+            tool_input=copy.deepcopy(tool_input),
         )
 
     @staticmethod
@@ -121,6 +122,16 @@ class Message:
     def text(self) -> str:
         """Concatenated TEXT blocks (convenience for display, not round-trip)."""
         return "\n".join(b.text or "" for b in self.content if b.type == BlockType.TEXT)
+
+    def display_text(self) -> str:
+        """TEXT blocks plus RAW placeholders — the text a writer that cannot hold
+        RAW should emit, so a RAW block degrades to its placeholder instead of
+        vanishing when a message is flattened to a single string."""
+        return "\n".join(
+            b.text or ""
+            for b in self.content
+            if b.type in (BlockType.TEXT, BlockType.RAW)
+        )
 
 
 @dataclass(frozen=True)

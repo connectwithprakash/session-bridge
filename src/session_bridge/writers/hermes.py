@@ -118,6 +118,8 @@ def write_hermes(session: Session) -> tuple[list[dict[str, Any]], ConversionRepo
                 if b.type is BlockType.TOOL_RESULT:
                     records.append(_tool_record(b, msg.timestamp))
         elif msg.role is Role.SYSTEM:
-            records.append({"role": "system", "content": msg.text(), "timestamp": msg.timestamp})
+            records.append(
+                {"role": "system", "content": msg.display_text(), "timestamp": msg.timestamp}
+            )
 
     return records, report

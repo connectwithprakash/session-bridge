@@ -30,6 +30,7 @@ from ..ir import (
     Session,
     SessionMeta,
 )
+from ._content import content_blocks
 from ._jsonl import load_records
 from ._pending import open_tool_calls
 
@@ -39,19 +40,6 @@ _ROLE_FROM_CODEX = {
     "system": Role.SYSTEM,
     "developer": Role.SYSTEM,
 }
-
-
-def _content_text(content: Any) -> str:
-    """Join input_text / output_text blocks of a Codex message."""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts = []
-    for b in content:
-        if isinstance(b, dict) and b.get("type") in ("input_text", "output_text", "text"):
-            parts.append(b.get("text", ""))
-    return "\n".join(parts)
 
 
 def _reasoning_text(payload: dict[str, Any]) -> str:
@@ -128,10 +116,10 @@ def read_codex(path: str | Path) -> Session:
             ptype = payload.get("type")
             if ptype == "message":
                 role = _ROLE_FROM_CODEX.get(payload.get("role"), Role.ASSISTANT)
-                text = _content_text(payload.get("content"))
-                # Preserve the turn even when empty so message count round-trips
-                # (write_codex emits an empty message to keep count stable).
-                content = (ContentBlock.text_block(text),) if text else ()
+                # Text parts -> TEXT blocks, non-text parts -> RAW passthrough
+                # (not silently dropped). Empty content is preserved as () so the
+                # turn/message count round-trips.
+                content = content_blocks(payload.get("content"))
                 messages.append(
                     Message(role=role, content=content, timestamp=ts, raw=rec)
                 )
