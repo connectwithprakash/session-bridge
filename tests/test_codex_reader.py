@@ -45,7 +45,17 @@ def test_reasoning_block():
         for b in m.content
         if b.type is BlockType.REASONING
     ]
+    # summary-shaped reasoning
     assert any("run ls" in (t or "") for t in reasoning_texts)
+    # content[]-shaped reasoning (the shape real Codex sessions actually use)
+    assert any("Running ls now" in (t or "") for t in reasoning_texts)
+
+
+def test_world_state_record_is_ignored_not_fatal():
+    # a real Codex session interleaves world_state records; they must not crash
+    # parsing nor become messages.
+    session = read_codex(FIXTURES / "codex_sample.jsonl")
+    assert all(m.role in (Role.USER, Role.ASSISTANT, Role.TOOL) for m in session.messages)
 
 
 def test_function_call_and_output():

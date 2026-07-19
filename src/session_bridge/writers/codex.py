@@ -20,15 +20,32 @@ def _msg_payload(role: str, text: str) -> dict[str, Any]:
     return {"type": "message", "role": role, "content": [{"type": block_type, "text": text}]}
 
 
-def write_codex(session: Session) -> tuple[list[dict[str, Any]], ConversionReport]:
+def write_codex(
+    session: Session, *, timestamp: str = "2000-01-01T00:00:00.000Z"
+) -> tuple[list[dict[str, Any]], ConversionReport]:
+    """Render the IR into a Codex rollout.
+
+    ``timestamp`` is the ISO time stamped on session_meta. Codex treats a rollout
+    whose session_meta lacks a valid top-level timestamp as empty and refuses to
+    resume it, so a non-null value is required; the caller should pass the real
+    current time (scripts cannot call the clock directly).
+    """
     report = report_losses(session, "codex")
     records: list[dict[str, Any]] = [
         {
-            "timestamp": None,
+            "timestamp": timestamp,
             "type": "session_meta",
             "payload": {
+                # Real Codex session_meta carries both session_id and id (same
+                # value); resume/discovery keys on these, so emit both.
+                "session_id": session.meta.session_id,
                 "id": session.meta.session_id,
+                "timestamp": timestamp,
                 "cwd": session.meta.cwd,
+                "originator": "codex-cli",
+                "cli_version": session.meta.version or "0.144.5",
+                "source": "cli",
+                "thread_source": "user",
                 "model_provider": session.meta.model_provider or "openai",
                 "base_instructions": {"text": session.meta.system_instructions or ""},
             },

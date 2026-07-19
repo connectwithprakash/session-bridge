@@ -97,7 +97,7 @@ that existed only in the converted transcript).
 |---|---|---|
 | Claude Code (2.1.x) | Write to `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`, then `claude --resume <uuid>` **launched from the matching cwd** | **Yes** |
 | Hermes | Valid filename in `~/.hermes/sessions/` is not enough | **No** (needs a SQLite session-store row) |
-| Codex | not tested (no API credit at time of writing) | unknown |
+| Codex | Rollout in `~/.codex/sessions/...` is accepted but not replayed as context | **No** (needs a `threads` row in `state_5.sqlite` + turn-structured records) |
 
 **Claude Code** resolves `--resume <uuid>` directly from the transcript file. The
 one catch: the encoded-cwd directory name must match the directory you launch
@@ -136,11 +136,21 @@ history and the model recalls it. Two things matter, both handled by the command
   route makes the resumed turn fall back and lose context, so set `--model` to a
   Hermes-configured model.
 
+**Codex** reading and round-trip are validated against a real tool-using session
+(driven through OpenRouter): `function_call` / `function_call_output` / `reasoning`
+(both `summary` and `content[]` shapes) parse correctly and round-trip identically.
+Codex also indexes sessions in SQLite (`state_5.sqlite`, a `threads` row with a
+`rollout_path`). Placing a rollout makes Codex *accept* it, but `codex resume` does
+not replay bare message records as context; it needs a `threads` row plus
+turn-structured records. So Codex convert/read is solid; live resume registration
+is not yet built (parallels the Hermes work).
+
 ## Known limitations
 
-- Codex tool-call records (`function_call` / `function_call_output`) are handled
-  per the documented Responses shape but were not present in local sample data;
-  covered by fixtures, pending validation against a tool-using Codex session.
+- Codex live-resume registration is not implemented: reading and round-trip are
+  verified against a real tool-using session, but making `codex resume` replay a
+  converted session as context needs a `threads`-store write plus turn structure
+  (parallels `register` for Hermes).
 - Queued-input detection is conservative: it may over-report undelivered input
   rather than silently drop it (the safe direction for resume). Enqueue/dequeue
   matching is scoped per `sessionId`.

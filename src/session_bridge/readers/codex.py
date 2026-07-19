@@ -58,14 +58,23 @@ def _content_text(content: Any) -> str:
 
 
 def _reasoning_text(payload: dict[str, Any]) -> str:
-    summary = payload.get("summary")
-    if isinstance(summary, list):
-        return "\n".join(
-            s.get("text", "") for s in summary if isinstance(s, dict)
-        )
-    if isinstance(payload.get("content"), str):
-        return payload["content"]
-    return ""
+    """Codex reasoning appears in either ``summary`` or ``content``, and each may
+    be a list of ``{type, text}`` blocks (real sessions) or a plain string.
+    Prefer non-empty ``content`` (the full reasoning) over ``summary``."""
+
+    def _join(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return "\n".join(
+                b.get("text", "") for b in value if isinstance(b, dict) and b.get("text")
+            )
+        return ""
+
+    content = _join(payload.get("content"))
+    if content.strip():
+        return content
+    return _join(payload.get("summary"))
 
 
 def _parse_arguments(raw_args: Any) -> dict[str, Any]:
