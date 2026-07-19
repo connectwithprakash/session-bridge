@@ -19,6 +19,11 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Optional
 
+# Marker a reader substitutes for a source content block the IR cannot represent
+# (e.g. a Claude Code image block). Lives here so readers and writers share one
+# definition; report_losses scans for it to report the loss.
+UNSUPPORTED_BLOCK_MARKER = "[unsupported "
+
 
 class Role(str, Enum):
     USER = "user"
@@ -32,6 +37,7 @@ class BlockType(str, Enum):
     REASONING = "reasoning"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+    RAW = "raw"
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,11 @@ class ContentBlock:
     - TOOL_CALL: ``tool_name`` + ``tool_input`` + ``call_id``.
     - TOOL_RESULT: ``call_id`` links back to the call; ``text`` holds the
       result payload; ``is_error`` marks a failed call.
+    - RAW: a source content block the IR has no typed representation for (e.g. a
+      Claude Code image/document block). ``raw_block`` holds the original block
+      verbatim and ``raw_kind`` its source type, so a same-harness writer can
+      re-emit it losslessly; a cross-harness writer degrades it to a reported
+      placeholder. ``text`` holds that human-readable placeholder.
     """
 
     type: BlockType
@@ -51,10 +62,21 @@ class ContentBlock:
     tool_input: Optional[dict[str, Any]] = None
     call_id: Optional[str] = None
     is_error: bool = False
+    raw_block: Optional[dict[str, Any]] = None
+    raw_kind: Optional[str] = None
 
     @staticmethod
     def text_block(text: str) -> "ContentBlock":
         return ContentBlock(type=BlockType.TEXT, text=text)
+
+    @staticmethod
+    def raw(raw_block: dict[str, Any], raw_kind: str) -> "ContentBlock":
+        return ContentBlock(
+            type=BlockType.RAW,
+            text=f"{UNSUPPORTED_BLOCK_MARKER}{raw_kind} block]",
+            raw_block=dict(raw_block),
+            raw_kind=raw_kind,
+        )
 
     @staticmethod
     def reasoning(text: str) -> "ContentBlock":

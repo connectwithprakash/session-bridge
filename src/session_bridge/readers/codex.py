@@ -137,12 +137,13 @@ def read_codex(path: str | Path) -> Session:
                 )
             elif ptype == "reasoning":
                 text = _reasoning_text(payload)
-                if text:
-                    messages.append(
-                        Message(role=Role.ASSISTANT,
-                                content=(ContentBlock.reasoning(text),),
-                                timestamp=ts, raw=rec)
-                    )
+                # Preserve the turn even when the reasoning summary is empty
+                # (redacted), matching the empty-message handling, so a reasoning
+                # record round-trips instead of vanishing.
+                content = (ContentBlock.reasoning(text),) if text else ()
+                messages.append(
+                    Message(role=Role.ASSISTANT, content=content, timestamp=ts, raw=rec)
+                )
             elif ptype == "function_call":
                 messages.append(
                     Message(
@@ -163,8 +164,15 @@ def read_codex(path: str | Path) -> Session:
                 is_error = False
                 if isinstance(out, dict):
                     # A dict output can carry an explicit failure flag; preserve it
-                    # so a failed tool call is not reported as successful.
-                    if out.get("success") is False or out.get("error"):
+                    # so a failed tool call is not reported as successful. Accept
+                    # both the JSON bool False and a string "false".
+                    success = out.get("success")
+                    failed = (
+                        success is False
+                        or (isinstance(success, str) and success.strip().lower() == "false")
+                        or bool(out.get("error"))
+                    )
+                    if failed:
                         is_error = True
                     out = out.get("content", json.dumps(out))
                 messages.append(

@@ -30,14 +30,19 @@ def _assistant_content(msg: Message) -> list[dict[str, Any]]:
             blocks.append(
                 {"type": "tool_use", "id": b.call_id, "name": b.tool_name, "input": b.tool_input or {}}
             )
+        elif b.type is BlockType.RAW and b.raw_block is not None:
+            # Re-emit the original block verbatim (lossless same-harness passthrough).
+            blocks.append(b.raw_block)
     return blocks
 
 
 def _user_content(msg: Message) -> Any:
     """User content is a plain string when it's only text, else a block list
-    (needed when it carries tool_result blocks)."""
-    has_result = any(b.type is BlockType.TOOL_RESULT for b in msg.content)
-    if not has_result:
+    (needed when it carries tool_result or RAW passthrough blocks)."""
+    needs_blocks = any(
+        b.type in (BlockType.TOOL_RESULT, BlockType.RAW) for b in msg.content
+    )
+    if not needs_blocks:
         return msg.text()
     blocks: list[dict[str, Any]] = []
     for b in msg.content:
@@ -52,6 +57,8 @@ def _user_content(msg: Message) -> Any:
                     "is_error": b.is_error,
                 }
             )
+        elif b.type is BlockType.RAW and b.raw_block is not None:
+            blocks.append(b.raw_block)
     return blocks
 
 

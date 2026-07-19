@@ -13,19 +13,54 @@ This is the "handshake protocol, not just file conversion" the research flagged.
 
 from __future__ import annotations
 
+from typing import Any
+
 from .ir import BlockType, ContentBlock, ConversionReport, Message, Role, Session
+
+# Stable first line of every handshake, used to detect and strip a handshake that
+# a prior conversion hop injected (so multi-hop conversions don't accumulate them).
+HANDSHAKE_TITLE = "# Session resume handshake"
+
+
+def is_handshake_message(message: Message) -> bool:
+    # Match on the title text, not the role: a handshake injected as SYSTEM can
+    # round-trip back as USER (Claude Code has no system record type and folds
+    # system into a user record), so role is unreliable but the title is stable.
+    return any(
+        b.type is BlockType.TEXT and (b.text or "").lstrip().startswith(HANDSHAKE_TITLE)
+        for b in message.content
+    )
+
+
+def strip_prior_handshakes(session: Session) -> Session:
+    """Remove any handshake messages a previous conversion hop injected, so a
+    fresh handshake replaces them instead of stacking."""
+    kept = tuple(m for m in session.messages if not is_handshake_message(m))
+    return session.with_messages(kept)
 
 
 def _open_call_details(session: Session) -> list[tuple[str, str, str]]:
-    """(call_id, tool_name, arguments-preview) for each unresolved call."""
+    """(call_id, tool_name, arguments-preview) for each unresolved call.
+
+    ``pending.open_tool_calls`` is computed positionally (a reissued call_id that
+    was resolved once then reissued is open again). Pick the LAST issuing block
+    per open id so a reissued call shows its current args, not the resolved
+    earlier occurrence.
+    """
     open_ids = set(session.pending.open_tool_calls)
-    out = []
+    last_block: dict[str, Any] = {}
     for m in session.messages:
         for b in m.content:
             if b.type is BlockType.TOOL_CALL and b.call_id in open_ids:
-                args = b.tool_input or {}
-                preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:4])
-                out.append((b.call_id, b.tool_name or "?", preview))
+                last_block[b.call_id] = b
+    out = []
+    for call_id in session.pending.open_tool_calls:
+        b = last_block.get(call_id)
+        if b is None:
+            continue
+        args = b.tool_input or {}
+        preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:4])
+        out.append((call_id, b.tool_name or "?", preview))
     return out
 
 
@@ -33,7 +68,7 @@ def build_handshake(session: Session, report: ConversionReport, target: str) -> 
     """Render a human+agent readable resume preamble in Markdown."""
     src = session.meta.source_harness
     lines: list[str] = []
-    lines.append("# Session resume handshake")
+    lines.append(HANDSHAKE_TITLE)
     lines.append("")
     lines.append(f"This session was exported from **{src}** and resumed in **{target}** "
                  f"by session-bridge. Read this before continuing.")
@@ -45,7 +80,8 @@ def build_handshake(session: Session, report: ConversionReport, target: str) -> 
         lines.append(f"- Working directory: `{session.meta.cwd}`")
     if session.meta.model:
         lines.append(f"- Source model: `{session.meta.model}`")
-    lines.append(f"- Turns carried over: {len(session.messages)}")
+    real_turns = sum(1 for m in session.messages if not is_handshake_message(m))
+    lines.append(f"- Turns carried over: {real_turns}")
     lines.append("")
 
     pending = session.pending

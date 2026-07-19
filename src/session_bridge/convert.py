@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .handshake import build_handshake, handshake_message
+from .handshake import build_handshake, handshake_message, strip_prior_handshakes
 from .ir import ConversionReport, Session
 from .readers.claude_code import read_claude_code
 from .readers.codex import read_codex
@@ -62,6 +62,10 @@ def convert(
         raise ValueError(f"unknown target harness '{target}'; choose from {HARNESSES}")
 
     session = read_session(source, path)
+    # Strip any handshake a previous conversion hop injected, so multi-hop
+    # conversions replace rather than accumulate handshakes (and the turn count
+    # reflects real turns, not stale injected instructions).
+    session = strip_prior_handshakes(session)
 
     # Build the report first (from the untouched session) so the handshake text can
     # cite the real losses, then optionally prepend the handshake message.

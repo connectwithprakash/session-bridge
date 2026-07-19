@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..ir import (
+    UNSUPPORTED_BLOCK_MARKER,
     ContentBlock,
     Message,
     PendingState,
@@ -77,10 +78,11 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
                 )
             )
         elif bt:
-            # Unknown block type (e.g. image, document, server_tool_use). The IR
-            # has no faithful representation, so preserve a visible placeholder
-            # rather than dropping the content silently.
-            blocks.append(ContentBlock.text_block(f"[unsupported {bt} block]"))
+            # Unknown block type (e.g. image, document, server_tool_use). Keep the
+            # original block verbatim as a RAW passthrough so a same-harness writer
+            # re-emits it losslessly; cross-harness writers degrade it to a
+            # reported placeholder rather than dropping it silently.
+            blocks.append(ContentBlock.raw(b, bt))
     return tuple(blocks)
 
 

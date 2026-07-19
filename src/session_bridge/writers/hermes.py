@@ -49,7 +49,8 @@ def _assistant_record(msg: Message) -> dict[str, Any]:
     reasoning_parts = []
     tool_calls = []
     for b in msg.content:
-        if b.type is BlockType.TEXT:
+        if b.type is BlockType.TEXT or b.type is BlockType.RAW:
+            # RAW degrades to its placeholder text in Hermes (no native support).
             text_parts.append(b.text or "")
         elif b.type is BlockType.REASONING:
             reasoning_parts.append(b.text or "")
@@ -94,8 +95,13 @@ def write_hermes(session: Session) -> tuple[list[dict[str, Any]], ConversionRepo
     for msg in session.messages:
         if msg.role is Role.USER:
             # A user record may carry tool_result blocks (Claude Code convention);
-            # split those into Hermes role:tool records.
-            text = msg.text()
+            # split those into Hermes role:tool records. TEXT and RAW-placeholder
+            # blocks form the user content.
+            text = "\n".join(
+                b.text or ""
+                for b in msg.content
+                if b.type in (BlockType.TEXT, BlockType.RAW)
+            )
             has_result = any(b.type is BlockType.TOOL_RESULT for b in msg.content)
             # Preserve the turn even when empty (no text, no results) so message
             # count survives the round trip; only suppress the plain-user record

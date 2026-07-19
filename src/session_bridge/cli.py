@@ -70,10 +70,15 @@ def cmd_convert(args: argparse.Namespace) -> int:
             return 2
         import uuid
 
+        from ._ids import UnsafeSessionIdError
         from .place import place_claude_code
 
         session_id = args.session_id or str(uuid.uuid4())
-        placed = place_claude_code(result.records, args.place_claude_cwd, session_id)
+        try:
+            placed = place_claude_code(result.records, args.place_claude_cwd, session_id)
+        except UnsafeSessionIdError as exc:
+            print(f"invalid --session-id: {exc}", file=sys.stderr)
+            return 2
         print(f"placed resumable session -> {placed}", file=sys.stderr)
         print(
             f"resume with:  (cd {args.place_claude_cwd} && claude --resume {session_id})",
@@ -92,6 +97,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     import time
     import uuid
 
+    from ._ids import UnsafeSessionIdError, validate_session_id
     from .writers.hermes_db import HermesRegistrationError, register_hermes_session
 
     session = read_session(args.source, args.path)
@@ -101,12 +107,18 @@ def cmd_register(args: argparse.Namespace) -> int:
         print(f"Hermes state.db not found: {db_path}", file=sys.stderr)
         return 2
 
+    session_id = args.session_id or f"sb_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    try:
+        validate_session_id(session_id)  # fail fast before backup/writes
+    except UnsafeSessionIdError as exc:
+        print(f"invalid --session-id: {exc}", file=sys.stderr)
+        return 2
+
     if not args.no_backup:
         backup = f"{db_path}.session-bridge-backup-{int(time.time())}"
         shutil.copy2(db_path, backup)
         print(f"backed up state.db -> {backup}", file=sys.stderr)
 
-    session_id = args.session_id or f"sb_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     try:
         register_hermes_session(
             session,

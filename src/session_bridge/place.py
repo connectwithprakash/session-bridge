@@ -19,6 +19,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from ._ids import validate_session_id
+
 
 def encode_cwd(cwd: str) -> str:
     """Reproduce Claude Code's project-dir encoding: resolve the real path
@@ -45,6 +47,7 @@ def place_claude_code(
     Returns the transcript path. Rewrites ``sessionId``/``cwd`` on message
     records so the transcript is internally consistent with where it lives.
     """
+    validate_session_id(session_id)  # reject path-traversal ids before touching the fs
     directory = claude_project_dir(cwd, claude_home)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{session_id}.jsonl"

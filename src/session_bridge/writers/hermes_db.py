@@ -92,7 +92,7 @@ def _message_rows(
         result_blocks = []
 
         for b in m.content:
-            if b.type is BlockType.TEXT:
+            if b.type is BlockType.TEXT or b.type is BlockType.RAW:
                 text_parts.append(b.text or "")
             elif b.type is BlockType.REASONING:
                 reasoning_parts.append(b.text or "")

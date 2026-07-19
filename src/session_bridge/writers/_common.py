@@ -9,11 +9,20 @@ handshake can compensate.
 
 from __future__ import annotations
 
-from ..ir import BlockType, ConversionReport, Session, ToolSchema
+from ..ir import (
+    UNSUPPORTED_BLOCK_MARKER,
+    BlockType,
+    ConversionReport,
+    Session,
+    ToolSchema,
+)
 
-# Which targets can hold which features.
+# Which targets can hold which features. Only list a capability the corresponding
+# writer actually EMITS — claude_code.py does not write permissionMode or
+# queue-operation records, so those are not claimed here (else report_losses would
+# suppress a real loss and report.ok() would lie).
 _TARGET_CAPS = {
-    "claude-code": {"thread_topology", "queued_input", "permission", "per_turn_model", "error_flag"},
+    "claude-code": {"thread_topology", "per_turn_model", "error_flag", "raw_passthrough"},
     "codex": {"system_instructions", "permission", "per_turn_model"},
     "hermes": {"tool_schemas"},
 }
@@ -21,6 +30,7 @@ _TARGET_CAPS = {
 # Prefix used to keep a failed-tool-call signal visible when the target format has
 # no native error flag (Codex function_call_output / Hermes role:tool).
 ERROR_MARKER = "[tool error] "
+
 
 
 def report_losses(session: Session, target: str) -> ConversionReport:
@@ -105,6 +115,19 @@ def report_losses(session: Session, target: str) -> ConversionReport:
             f"{len(session.pending.open_tool_calls)} open tool call(s) with no result; "
             f"resume requires the handshake preamble to satisfy or abandon them."
         )
+
+    # 9. RAW passthrough blocks (a source block the IR can't type, e.g. an image).
+    # A same-harness writer that can re-emit them loses nothing; any other target
+    # degrades them to a text placeholder, which is lossy and must be reported.
+    if "raw_passthrough" not in caps:
+        raw_blocks = sum(
+            1 for m in session.messages for b in m.content if b.type is BlockType.RAW
+        )
+        if raw_blocks:
+            report.warn(
+                f"{raw_blocks} content block(s) with no IR representation "
+                f"(e.g. image/document) degrade to a text placeholder in {target}."
+            )
 
     return report
 

@@ -215,6 +215,11 @@ def test_claude_reader_preserves_unknown_block(tmp_path):
         encoding="utf-8",
     )
     session = read_claude_code(f)
-    # content not silently empty; a visible placeholder names the dropped type
+    # content not silently empty; preserved as a RAW passthrough block that keeps
+    # the original verbatim (lossless same-harness) with a placeholder for display
     assert session.messages[0].content
-    assert "image" in session.messages[0].text()
+    block = session.messages[0].content[0]
+    assert block.type is BlockType.RAW
+    assert block.raw_kind == "image"
+    assert block.raw_block == {"type": "image", "source": {"data": "..."}}
+    assert "image" in (block.text or "")

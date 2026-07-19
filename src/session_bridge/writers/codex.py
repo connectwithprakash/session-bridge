@@ -77,7 +77,9 @@ def write_codex(
         ts = msg.timestamp
         before = len(records)
         for b in msg.content:
-            if b.type is BlockType.TEXT:
+            if b.type is BlockType.TEXT or b.type is BlockType.RAW:
+                # RAW has no Codex representation; emit its placeholder text so the
+                # turn isn't silently dropped (the loss is reported separately).
                 add(_msg_payload(_codex_role(msg.role), b.text or ""), ts)
             elif b.type is BlockType.REASONING:
                 add({"type": "reasoning", "summary": [{"type": "summary_text", "text": b.text or ""}]}, ts)
