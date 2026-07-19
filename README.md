@@ -48,6 +48,10 @@ cd session-bridge
 python3 -m pip install -e .
 ```
 
+New here? [`TUTORIAL.md`](TUTORIAL.md) is a step-by-step walkthrough (find your
+session file → inspect → convert → resume) with a real worked example. The
+sections below are the quick reference.
+
 ## Usage
 
 Inspect a session's structure:
