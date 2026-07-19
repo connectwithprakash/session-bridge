@@ -79,8 +79,24 @@ def write_claude_code(session: Session) -> tuple[list[dict[str, Any]], Conversio
     prev_uid: Optional[str] = None
     emitted_uids: set[str] = set()
 
+    # Uids already claimed by real messages. A synthesized uid must avoid these
+    # (and each other), or a message that already carries a real ``sb-NNNNNN``
+    # uid from a prior conversion would collide with a positional synth uid and
+    # two records would share one uuid — collapsing the thread on resume.
+    real_uids = {m.uid for m in session.messages if m.uid}
+    taken: set[str] = set(real_uids)
+
+    def _fresh_synth_uid(index: int) -> str:
+        candidate = _synth_uid(index)
+        bump = 0
+        while candidate in taken:
+            bump += 1
+            candidate = f"{_synth_uid(index)}-{bump}"
+        taken.add(candidate)
+        return candidate
+
     for i, msg in enumerate(session.messages):
-        uid = msg.uid or _synth_uid(i)
+        uid = msg.uid or _fresh_synth_uid(i)
         if have_links and msg.uid and msg.parent_uid and msg.parent_uid in emitted_uids:
             parent = msg.parent_uid
         else:

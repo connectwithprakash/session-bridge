@@ -196,6 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import sqlite3
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
@@ -207,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except UnicodeDecodeError as exc:
         print(f"error: file is not valid UTF-8: {exc}", file=sys.stderr)
+        return 2
+    except sqlite3.Error as exc:
+        # e.g. --db pointing at a file that is not a valid SQLite database.
+        print(f"error: SQLite failure: {exc}", file=sys.stderr)
         return 2
 
 
