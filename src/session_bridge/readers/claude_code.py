@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 from ..ir import (
-    UNSUPPORTED_BLOCK_MARKER,
     ContentBlock,
     Message,
     PendingState,
@@ -64,12 +63,23 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
             )
         elif bt == "tool_result":
             result = b.get("content", "")
+            nontext_parts: list[dict[str, Any]] = []
             if isinstance(result, list):
-                # Anthropic tool_result content can itself be a block list.
-                result = "\n".join(
-                    part.get("text", "") if isinstance(part, dict) else str(part)
-                    for part in result
-                )
+                # Anthropic tool_result content can itself be a block list mixing
+                # text with non-text parts (e.g. an image from a Read of a PNG).
+                # Join the text parts for the result payload, and keep each
+                # non-text part as a RAW passthrough sibling so it is preserved
+                # (same-harness) and reported (cross-harness) rather than silently
+                # dropped into an empty result.
+                text_bits = []
+                for part in result:
+                    if isinstance(part, dict) and part.get("type") in (None, "text"):
+                        text_bits.append(part.get("text", ""))
+                    elif isinstance(part, dict) and part.get("type"):
+                        nontext_parts.append(part)
+                    else:
+                        text_bits.append(str(part))
+                result = "\n".join(text_bits)
             blocks.append(
                 ContentBlock.tool_result(
                     call_id=b.get("tool_use_id", ""),
@@ -77,6 +87,8 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
                     is_error=bool(b.get("is_error", False)),
                 )
             )
+            for part in nontext_parts:
+                blocks.append(ContentBlock.raw(part, part.get("type")))
         elif bt:
             # Unknown block type (e.g. image, document, server_tool_use). Keep the
             # original block verbatim as a RAW passthrough so a same-harness writer
