@@ -104,7 +104,9 @@ def test_native_raw_same_harness_still_not_reported():
         )),),
     )
     _, report = write_claude_code(s)
-    assert not any("no IR representation" in w for w in report.warnings)
+    # same-harness re-emits the RAW block losslessly -> no degrade-to-placeholder warning
+    assert not any(("no IR representation" in w) or ("degrade to a text placeholder" in w)
+                   for w in report.warnings)
 
 
 # ---- HIGH: Codex per-turn model switch reported ----

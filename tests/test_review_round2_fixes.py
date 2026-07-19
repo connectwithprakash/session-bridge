@@ -110,7 +110,8 @@ def test_raw_block_round_trips_lossless_same_harness(tmp_path):
     assert block.type is BlockType.RAW
     assert block.raw_block == {"type": "image", "source": {"data": "AAA"}}
     # same-harness: no loss reported
-    assert not any("no IR representation" in w for w in report.warnings)
+    assert not any(("no IR representation" in w) or ("degrade to a text placeholder" in w)
+                   for w in report.warnings)
 
 
 def test_raw_block_degrades_and_reports_cross_harness():

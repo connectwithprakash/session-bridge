@@ -72,12 +72,14 @@ def test_hermes_db_no_fabricated_row_from_tool_result_parts(tmp_path):
     roles = [r[0] for r in conn.execute(
         "SELECT role FROM messages WHERE session_id='s1' ORDER BY timestamp"
     ).fetchall()]
-    contents = [r[0] or "" for r in conn.execute(
-        "SELECT content FROM messages WHERE session_id='s1' ORDER BY timestamp"
-    ).fetchall()]
+    rows = conn.execute(
+        "SELECT role, content FROM messages WHERE session_id='s1' ORDER BY timestamp"
+    ).fetchall()
     conn.close()
-    assert roles == ["assistant", "tool", "assistant"]  # no fabricated user row
-    assert not any("unsupported" in c for c in contents)
+    assert roles == ["assistant", "tool", "assistant"]  # no fabricated user/assistant row
+    # the image placeholder legitimately appears in the TOOL row (r18b/r19), but
+    # must NOT appear in any non-tool row (that would be the phantom-turn bug).
+    assert not any("unsupported" in (c or "") for role, c in rows if role != "tool")
 
 
 def test_same_harness_round_trip_preserves_image_and_turn_count(tmp_path):

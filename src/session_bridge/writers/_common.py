@@ -180,8 +180,8 @@ def report_losses(session: Session, target: str) -> ConversionReport:
         total = raw_blocks + result_part_count
         if total:
             report.warn(
-                f"{total} content block(s) with no IR representation "
-                f"(e.g. image/document) degrade to a text placeholder in {target}."
+                f"{total} non-text content part(s) (e.g. image/document) that "
+                f"{target} cannot render degrade to a text placeholder."
             )
 
     # 10. Hermes block ordering. Hermes stores a turn's blocks in separate fields
@@ -235,21 +235,23 @@ def report_losses(session: Session, target: str) -> ConversionReport:
 def tool_result_text(block) -> str:
     """Text a cross-harness writer should emit for a TOOL_RESULT block.
 
-    A tool_result whose original content was non-text (e.g. an image, tool
-    references) has empty ``text`` and its parts on ``result_parts``. Those
-    targets cannot render the parts, so emit a visible placeholder describing
-    them — matching the loss the ConversionReport already warns about — instead
-    of a bare empty string that reads as 'the tool returned nothing'.
+    A tool_result may carry non-text parts (image, tool references) on
+    ``result_parts`` — alongside text, or as its whole body. Those targets can't
+    render the parts, so a placeholder describing them is appended (or is the
+    whole body when there is no text). This surfaces the loss the ConversionReport
+    already warns about for EVERY part, not just parts-only results, instead of
+    silently dropping parts that sat next to text.
     """
     text = block.text or ""
-    if text or not block.result_parts:
+    if not block.result_parts:
         return text
     kinds: dict[str, int] = {}
     for p in block.result_parts:
         k = p.get("type", "part") if isinstance(p, dict) else "part"
         kinds[k] = kinds.get(k, 0) + 1
     summary = ", ".join(f"{n} {k}" for k, n in kinds.items())
-    return f"{UNSUPPORTED_BLOCK_MARKER}non-text tool result: {summary}]"
+    placeholder = f"{UNSUPPORTED_BLOCK_MARKER}non-text tool result: {summary}]"
+    return f"{text}\n{placeholder}" if text else placeholder
 
 
 def reconstruct_tool_schemas(session: Session) -> tuple[ToolSchema, ...]:

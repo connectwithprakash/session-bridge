@@ -25,9 +25,10 @@ def _parts_only_session():
 def test_helper_placeholder_for_parts_only():
     b = ContentBlock.tool_result("c1", "", result_parts=(_IMG,))
     assert "image" in tool_result_text(b) and tool_result_text(b) != ""
-    # text present -> returned as-is
+    # text + parts -> text with the placeholder appended (parts not dropped)
     b2 = ContentBlock.tool_result("c1", "real output", result_parts=(_IMG,))
-    assert tool_result_text(b2) == "real output"
+    assert tool_result_text(b2).startswith("real output")
+    assert "image" in tool_result_text(b2)
     # no parts, no text -> empty (unchanged)
     b3 = ContentBlock.tool_result("c1", "")
     assert tool_result_text(b3) == ""
@@ -63,6 +64,24 @@ def test_hermes_db_parts_only_result_not_empty(tmp_path):
     content = conn.execute("SELECT content FROM messages WHERE tool_call_id='c1'").fetchone()[0]
     conn.close()
     assert content and "image" in content
+
+
+def test_text_plus_parts_surfaces_both(tmp_path):
+    # r19: a tool_result with BOTH text and non-text parts must keep the text AND
+    # surface a placeholder for the parts cross-harness (parts not silently dropped).
+    b = ContentBlock.tool_result("c1", "the diff applied", result_parts=(_IMG,))
+    txt = tool_result_text(b)
+    assert "the diff applied" in txt
+    assert "image" in txt
+
+    s = Session(
+        meta=SessionMeta(source_harness="claude-code", model="m"),
+        messages=(Message(role=Role.TOOL, content=(b,)),),
+    )
+    records, _ = write_codex(s)
+    out = next(r for r in records if r["payload"].get("type") == "function_call_output")
+    assert "the diff applied" in out["payload"]["output"]
+    assert "image" in out["payload"]["output"]
 
 
 def test_multiple_part_kinds_summarized():
