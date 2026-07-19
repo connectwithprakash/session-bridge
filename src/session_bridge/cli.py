@@ -62,6 +62,22 @@ def cmd_convert(args: argparse.Namespace) -> int:
     if args.handshake_out:
         Path(args.handshake_out).write_text(result.handshake, encoding="utf-8")
         print(f"wrote resume handshake -> {args.handshake_out}", file=sys.stderr)
+
+    if args.place_claude_cwd:
+        if args.target != "claude-code":
+            print("--place-claude-cwd only applies when --to claude-code", file=sys.stderr)
+            return 2
+        import uuid
+
+        from .place import place_claude_code
+
+        session_id = args.session_id or str(uuid.uuid4())
+        placed = place_claude_code(result.records, args.place_claude_cwd, session_id)
+        print(f"placed resumable session -> {placed}", file=sys.stderr)
+        print(
+            f"resume with:  (cd {args.place_claude_cwd} && claude --resume {session_id})",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -82,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
     conv.add_argument("--handshake-out", help="also write the resume handshake to this path")
     conv.add_argument("--no-handshake", action="store_true",
                       help="do not prepend the resume handshake message")
+    conv.add_argument("--place-claude-cwd", metavar="CWD",
+                      help="also place the converted session under Claude Code's "
+                           "project dir for this cwd, so `claude --resume` finds it "
+                           "(only valid with --to claude-code)")
+    conv.add_argument("--session-id",
+                      help="session id to use when placing (default: a fresh uuid)")
     conv.set_defaults(func=cmd_convert)
     return parser
 

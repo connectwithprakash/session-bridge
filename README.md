@@ -88,23 +88,35 @@ The following are **inherently lossy** and are reported per conversion (see
 
 ## Getting a converted session recognized by the target
 
-session-bridge produces a valid target-format transcript, but current harness
-versions do **not** discover a session from its transcript file alone. Both index
-sessions through a private store:
+How a converted transcript becomes resumable differs per harness. Both cases are
+verified on real installs (a session was round-tripped Claude Code → Hermes →
+Claude Code and successfully resumed in a live `claude` process, recalling a fact
+that existed only in the converted transcript).
 
-| Harness | Transcript location | Resume index (the actual key) |
+| Harness | How to place it | Resumes from file alone? |
 |---|---|---|
-| Claude Code (2.1.x) | `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` | `~/.claude/sessions/` + `~/.claude/history.jsonl` |
-| Hermes | `~/.hermes/sessions/<ts>_<id>.jsonl` | SQLite session store |
+| Claude Code (2.1.x) | Write to `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`, then `claude --resume <uuid>` **launched from the matching cwd** | **Yes** |
+| Hermes | Valid filename in `~/.hermes/sessions/` is not enough | **No** (needs a SQLite session-store row) |
+| Codex | not tested (no API credit at time of writing) | unknown |
 
-Verified on real installs: dropping a converted `.jsonl` into the transcript
-directory does not make it appear in `claude --resume` or `hermes sessions list`.
-So the converted transcript is correct and complete, but wiring it into a live
-harness's resume flow needs a per-harness registration step (write the index
-/ store entry) that this tool does not yet perform. Until then, the transcript
-and its handshake are usable for reading, diffing, and manual paste-in; automatic
-`--resume` recognition is future work. Codex was not tested (no API credit at
-time of writing).
+**Claude Code** resolves `--resume <uuid>` directly from the transcript file. The
+one catch: the encoded-cwd directory name must match the directory you launch
+`claude` from (note macOS symlinks like `/tmp` → `/private/tmp`; use the real
+resolved path). No separate index write is needed. Pass `--place-claude-cwd` to
+`convert` and session-bridge writes the transcript to the right place and prints
+the exact resume command:
+
+```bash
+session-bridge convert --from hermes --to claude-code SESSION.jsonl \
+  --place-claude-cwd ~/Developer/myproject
+# placed resumable session -> ~/.claude/projects/-Users-you-Developer-myproject/<uuid>.jsonl
+# resume with:  (cd ~/Developer/myproject && claude --resume <uuid>)
+```
+
+**Hermes** indexes sessions in a SQLite store; a dropped-in `.jsonl` (even
+correctly named) is not seen by `hermes sessions list` or `--resume`. Registering
+a converted session there needs a store-write step this tool does not yet perform
+([issue #1](https://github.com/connectwithprakash/session-bridge/issues/1)).
 
 ## Known limitations
 
@@ -125,7 +137,7 @@ time of writing).
 ## Development
 
 ```bash
-python3 -m pytest        # 56 tests: IR, three readers, writers/round-trips, handshake, CLI
+python3 -m pytest        # 61 tests: IR, three readers, writers/round-trips, handshake, place, CLI
 ```
 
 Real captured sessions may contain secrets; `fixtures/real/` is gitignored and

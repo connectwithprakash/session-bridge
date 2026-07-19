@@ -110,10 +110,25 @@ you or the agent can re-run it before proceeding.
 
 ## 5. Resume in the target harness
 
-Open `resumed.jsonl` in the target harness's session directory (from the table in
-step 1) and start it. Because the handshake is the first message, the agent picks
-up knowing exactly where the previous session left off and what state to resolve
-first.
+**Claude Code target (one command).** Add `--place-claude-cwd <dir>` to the
+convert in step 3. session-bridge writes the transcript to the exact path Claude
+Code resolves and prints the resume command:
+
+```bash
+session-bridge convert --from hermes --to claude-code SESSION.jsonl \
+  --place-claude-cwd ~/Developer/myproject
+# placed resumable session -> ~/.claude/projects/.../<uuid>.jsonl
+# resume with:  (cd ~/Developer/myproject && claude --resume <uuid>)
+```
+
+Run that printed command and the session continues live. Verified end-to-end: a
+converted session resumed in a real `claude` process and recalled a fact that
+existed only in the converted transcript.
+
+**Other targets.** For Hermes, a dropped-in file is not enough; its session store
+needs a row (see README, "Getting a converted session recognized by the target").
+Because the handshake is the first message, once a target does load the session,
+the agent picks up knowing exactly where the previous one left off.
 
 ---
 
