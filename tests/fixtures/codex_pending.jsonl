@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-18T06:41:38.600Z","type":"session_meta","payload":{"id":"cx-2","cwd":"/Users/x/dev","model_provider":"openai","base_instructions":{"text":"You are Codex."}}}
+{"timestamp":"2026-07-18T06:41:40.000Z","type":"turn_context","payload":{"turn_id":"t1","model":"gpt-5-codex","approval_policy":"on-request"}}
+{"timestamp":"2026-07-18T06:41:41.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run the migration"}]}}
+{"timestamp":"2026-07-18T06:41:46.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":\"./migrate.sh\"}","call_id":"fc_open"}}
