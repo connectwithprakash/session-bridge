@@ -25,18 +25,8 @@ from ..ir import (
     SessionMeta,
     ToolSchema,
 )
+from ._jsonl import load_records
 from ._pending import open_tool_calls
-
-
-def _load_lines(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            records.append(json.loads(line))
-    return records
 
 
 def _parse_tool_schemas(raw_tools: Any) -> tuple[ToolSchema, ...]:
@@ -71,13 +61,31 @@ def _parse_arguments(raw_args: Any) -> dict[str, Any]:
     return {}
 
 
+def _content_to_text(content: Any) -> str:
+    """Normalize an OpenAI-style ``content`` to text.
+
+    Content may be a plain string or a list of parts (multi-modal), e.g.
+    ``[{"type": "text", "text": "hi"}, {"type": "image_url", ...}]``. Join the
+    textual parts; non-text parts (images) have no text and are skipped.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, dict) and isinstance(p.get("text"), str):
+                parts.append(p["text"])
+        return "\n".join(parts)
+    return ""
+
+
 def _assistant_blocks(record: dict[str, Any]) -> tuple[ContentBlock, ...]:
     blocks: list[ContentBlock] = []
     reasoning = record.get("reasoning")
     if isinstance(reasoning, str) and reasoning.strip():
         blocks.append(ContentBlock.reasoning(reasoning))
-    content = record.get("content")
-    if isinstance(content, str) and content.strip():
+    content = _content_to_text(record.get("content"))
+    if content.strip():
         blocks.append(ContentBlock.text_block(content))
     for call in record.get("tool_calls") or []:
         if not isinstance(call, dict):
@@ -96,7 +104,7 @@ def _assistant_blocks(record: dict[str, Any]) -> tuple[ContentBlock, ...]:
 
 def read_hermes(path: str | Path) -> Session:
     path = Path(path)
-    records = _load_lines(path)
+    records = load_records(path)
 
     meta = SessionMeta(source_harness="hermes")
     tools: tuple[ToolSchema, ...] = ()
@@ -113,7 +121,7 @@ def read_hermes(path: str | Path) -> Session:
             )
             tools = _parse_tool_schemas(rec.get("tools"))
         elif role == "user":
-            content = rec.get("content", "")
+            content = _content_to_text(rec.get("content"))
             blocks = (ContentBlock.text_block(content),) if content else ()
             messages.append(
                 Message(

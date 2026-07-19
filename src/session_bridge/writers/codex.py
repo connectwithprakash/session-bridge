@@ -15,8 +15,16 @@ from ..ir import BlockType, ConversionReport, Role, Session
 from ._common import ERROR_MARKER, report_losses
 
 
+_ROLE_TO_CODEX = {Role.USER: "user", Role.ASSISTANT: "assistant", Role.SYSTEM: "system"}
+
+
+def _codex_role(role: Role) -> str:
+    return _ROLE_TO_CODEX.get(role, "user")
+
+
 def _msg_payload(role: str, text: str) -> dict[str, Any]:
-    block_type = "input_text" if role == "user" else "output_text"
+    # Assistant emits output_text; user/system emit input_text.
+    block_type = "output_text" if role == "assistant" else "input_text"
     return {"type": "message", "role": role, "content": [{"type": block_type, "text": text}]}
 
 
@@ -70,8 +78,7 @@ def write_codex(
         before = len(records)
         for b in msg.content:
             if b.type is BlockType.TEXT:
-                role = "user" if msg.role is Role.USER else "assistant"
-                add(_msg_payload(role, b.text or ""), ts)
+                add(_msg_payload(_codex_role(msg.role), b.text or ""), ts)
             elif b.type is BlockType.REASONING:
                 add({"type": "reasoning", "summary": [{"type": "summary_text", "text": b.text or ""}]}, ts)
             elif b.type is BlockType.TOOL_CALL:
@@ -90,8 +97,7 @@ def write_codex(
                     output = ERROR_MARKER + output
                 add({"type": "function_call_output", "call_id": b.call_id, "output": output}, ts)
         # Preserve an otherwise-empty message so message count survives the round trip.
-        if len(records) == before and msg.role in (Role.USER, Role.ASSISTANT):
-            role = "user" if msg.role is Role.USER else "assistant"
-            add(_msg_payload(role, ""), ts)
+        if len(records) == before and msg.role in (Role.USER, Role.ASSISTANT, Role.SYSTEM):
+            add(_msg_payload(_codex_role(msg.role), ""), ts)
 
     return records, report

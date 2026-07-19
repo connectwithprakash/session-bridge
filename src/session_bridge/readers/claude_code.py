@@ -30,20 +30,10 @@ from ..ir import (
     Session,
     SessionMeta,
 )
+from ._jsonl import load_records
 from ._pending import open_tool_calls
 
 _MESSAGE_TYPES = {"user", "assistant"}
-
-
-def _load_lines(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            records.append(json.loads(line))
-    return records
 
 
 def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
@@ -60,7 +50,7 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
         bt = b.get("type")
         if bt == "text":
             blocks.append(ContentBlock.text_block(b.get("text", "")))
-        elif bt == "thinking":
+        elif bt in ("thinking", "redacted_thinking"):
             blocks.append(ContentBlock.reasoning(b.get("thinking", "")))
         elif bt == "tool_use":
             inp = b.get("input")
@@ -86,6 +76,11 @@ def _blocks_from_content(content: Any) -> tuple[ContentBlock, ...]:
                     is_error=bool(b.get("is_error", False)),
                 )
             )
+        elif bt:
+            # Unknown block type (e.g. image, document, server_tool_use). The IR
+            # has no faithful representation, so preserve a visible placeholder
+            # rather than dropping the content silently.
+            blocks.append(ContentBlock.text_block(f"[unsupported {bt} block]"))
     return tuple(blocks)
 
 
@@ -139,7 +134,7 @@ def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
 
 def read_claude_code(path: str | Path) -> Session:
     path = Path(path)
-    records = _load_lines(path)
+    records = load_records(path)
 
     meta = SessionMeta(source_harness="claude-code")
     messages: list[Message] = []

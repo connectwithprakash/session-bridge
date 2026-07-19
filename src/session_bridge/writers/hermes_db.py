@@ -35,6 +35,7 @@ import sqlite3
 from typing import Any, Optional
 
 from ..ir import BlockType, Message, Role, Session
+from ._common import ERROR_MARKER
 
 _ROLE_TO_DB = {
     Role.USER: "user",
@@ -83,14 +84,12 @@ def _message_rows(
     even when the source timestamps are missing or non-numeric.
     """
     rows: list[dict[str, Any]] = []
-    for i, m in enumerate(messages):
-        ts = base_ts + float(i)
+    ts = base_ts
+    for m in messages:
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
-        tool_call_id: Optional[str] = None
-        tool_name: Optional[str] = None
-        role = _ROLE_TO_DB.get(m.role, "user")
+        result_blocks = []
 
         for b in m.content:
             if b.type is BlockType.TEXT:
@@ -110,22 +109,46 @@ def _message_rows(
                     }
                 )
             elif b.type is BlockType.TOOL_RESULT:
-                role = "tool"
-                tool_call_id = b.call_id
-                text_parts.append(b.text or "")
+                result_blocks.append(b)
 
-        rows.append(
-            {
-                "session_id": session_id,
-                "role": role,
-                "content": "\n".join(text_parts) if text_parts else None,
-                "tool_call_id": tool_call_id,
-                "tool_calls": json.dumps(tool_calls) if tool_calls else None,
-                "tool_name": tool_name,
-                "timestamp": ts,
-                "reasoning": "\n".join(reasoning_parts) if reasoning_parts else None,
-            }
-        )
+        # Each tool result becomes its own `tool` row keyed by its call_id, so
+        # parallel results in one IR message keep distinct linkage (matching the
+        # JSONL writer). Never collapse two call_ids into one row.
+        for b in result_blocks:
+            content = b.text or ""
+            if b.is_error:
+                content = ERROR_MARKER + content
+            rows.append(
+                {
+                    "session_id": session_id,
+                    "role": "tool",
+                    "content": content,
+                    "tool_call_id": b.call_id,
+                    "tool_calls": None,
+                    "tool_name": None,
+                    "timestamp": ts,
+                    "reasoning": None,
+                }
+            )
+            ts += 1.0
+
+        # Emit the non-result part of the message (text/reasoning/tool_calls) as
+        # one row, unless the message was purely tool results.
+        has_nonresult = text_parts or reasoning_parts or tool_calls
+        if has_nonresult or not result_blocks:
+            rows.append(
+                {
+                    "session_id": session_id,
+                    "role": _ROLE_TO_DB.get(m.role, "user"),
+                    "content": "\n".join(text_parts) if text_parts else None,
+                    "tool_call_id": None,
+                    "tool_calls": json.dumps(tool_calls) if tool_calls else None,
+                    "tool_name": None,
+                    "timestamp": ts,
+                    "reasoning": "\n".join(reasoning_parts) if reasoning_parts else None,
+                }
+            )
+            ts += 1.0
     return rows
 
 
@@ -177,35 +200,45 @@ def register_hermes_session(
             1 for m in session.messages for b in m.content if b.type is BlockType.TOOL_CALL
         )
 
-        with conn:  # transaction: commit on success, rollback on error
-            conn.execute(
-                """
-                INSERT INTO sessions
-                    (id, source, model, started_at, message_count,
-                     tool_call_count, title, cwd, archived)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-                """,
-                (
-                    session_id,
-                    source,
-                    model or session.meta.model,
-                    started_at,
-                    len(msgs),
-                    tool_call_count,
-                    title,
-                    session.meta.cwd,
-                ),
-            )
-            conn.executemany(
-                """
-                INSERT INTO messages
-                    (session_id, role, content, tool_call_id, tool_calls,
-                     tool_name, timestamp, reasoning)
-                VALUES
-                    (:session_id, :role, :content, :tool_call_id, :tool_calls,
-                     :tool_name, :timestamp, :reasoning)
-                """,
-                msgs,
-            )
+        try:
+            with conn:  # transaction: commit on success, rollback on error
+                conn.execute(
+                    """
+                    INSERT INTO sessions
+                        (id, source, model, started_at, message_count,
+                         tool_call_count, title, cwd, archived)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        session_id,
+                        source,
+                        model or session.meta.model,
+                        started_at,
+                        len(msgs),
+                        tool_call_count,
+                        title,
+                        session.meta.cwd,
+                    ),
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO messages
+                        (session_id, role, content, tool_call_id, tool_calls,
+                         tool_name, timestamp, reasoning)
+                    VALUES
+                        (:session_id, :role, :content, :tool_call_id, :tool_calls,
+                         :tool_name, :timestamp, :reasoning)
+                    """,
+                    msgs,
+                )
+        except sqlite3.IntegrityError as exc:
+            # The pre-checks above are advisory (not atomic with the write): a
+            # concurrent registration or an empty-string title can still trip a
+            # UNIQUE constraint here. Surface the module's contracted exception
+            # type rather than leaking a raw sqlite3 error to callers. The
+            # transaction has already rolled back.
+            raise HermesRegistrationError(
+                f"registration conflict for session {session_id}: {exc}"
+            ) from exc
     finally:
         conn.close()

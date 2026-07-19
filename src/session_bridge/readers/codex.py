@@ -30,18 +30,15 @@ from ..ir import (
     Session,
     SessionMeta,
 )
+from ._jsonl import load_records
 from ._pending import open_tool_calls
 
-
-def _load_lines(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            records.append(json.loads(line))
-    return records
+_ROLE_FROM_CODEX = {
+    "user": Role.USER,
+    "assistant": Role.ASSISTANT,
+    "system": Role.SYSTEM,
+    "developer": Role.SYSTEM,
+}
 
 
 def _content_text(content: Any) -> str:
@@ -91,7 +88,7 @@ def _parse_arguments(raw_args: Any) -> dict[str, Any]:
 
 def read_codex(path: str | Path) -> Session:
     path = Path(path)
-    records = _load_lines(path)
+    records = load_records(path)
 
     meta = SessionMeta(source_harness="codex", model_provider="openai")
     messages: list[Message] = []
@@ -130,13 +127,14 @@ def read_codex(path: str | Path) -> Session:
         elif rtype == "response_item":
             ptype = payload.get("type")
             if ptype == "message":
-                role = Role.USER if payload.get("role") == "user" else Role.ASSISTANT
+                role = _ROLE_FROM_CODEX.get(payload.get("role"), Role.ASSISTANT)
                 text = _content_text(payload.get("content"))
-                if text:
-                    messages.append(
-                        Message(role=role, content=(ContentBlock.text_block(text),),
-                                timestamp=ts, raw=rec)
-                    )
+                # Preserve the turn even when empty so message count round-trips
+                # (write_codex emits an empty message to keep count stable).
+                content = (ContentBlock.text_block(text),) if text else ()
+                messages.append(
+                    Message(role=role, content=content, timestamp=ts, raw=rec)
+                )
             elif ptype == "reasoning":
                 text = _reasoning_text(payload)
                 if text:
@@ -162,7 +160,12 @@ def read_codex(path: str | Path) -> Session:
                 )
             elif ptype == "function_call_output":
                 out = payload.get("output", "")
+                is_error = False
                 if isinstance(out, dict):
+                    # A dict output can carry an explicit failure flag; preserve it
+                    # so a failed tool call is not reported as successful.
+                    if out.get("success") is False or out.get("error"):
+                        is_error = True
                     out = out.get("content", json.dumps(out))
                 messages.append(
                     Message(
@@ -171,6 +174,7 @@ def read_codex(path: str | Path) -> Session:
                             ContentBlock.tool_result(
                                 call_id=payload.get("call_id", ""),
                                 text=out if isinstance(out, str) else json.dumps(out),
+                                is_error=is_error,
                             ),
                         ),
                         timestamp=ts,
