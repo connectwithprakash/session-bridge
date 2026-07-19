@@ -1,7 +1,7 @@
 # Tutorial: resume a stalled session in another harness
 
-You were mid-task in one coding agent and it stopped — usage limit hit, crash, or
-you just want to continue in a different tool. This walks you from that dead
+You were mid-task in one coding agent and it stopped: usage limit hit, a crash,
+or you just want to continue in a different tool. This walks you from that dead
 session file to a live, resumable one in another harness.
 
 The whole flow is five steps:
@@ -11,7 +11,7 @@ The whole flow is five steps:
      (locate)     (sanity)   (translate)  (what to do)   (in target)
 ```
 
-We'll do a real end-to-end example at the end (Hermes → Claude Code) with actual
+There's a real end-to-end example at the end (Hermes → Claude Code) with actual
 command output.
 
 ---
@@ -50,8 +50,8 @@ dashes, so a session for `~/Developer/foo` lives under a folder like
 
 ## 2. Inspect it (sanity check before converting)
 
-`inspect` parses the session and prints its structure — how many turns, tool
-calls, and — importantly — whether it stopped mid-turn with **pending state**.
+`inspect` parses the session and prints its structure: how many turns, how many
+tool calls, and whether it stopped mid-turn with **pending state**.
 
 ```bash
 session-bridge inspect --from hermes ~/.hermes/sessions/<file>.jsonl
@@ -59,10 +59,10 @@ session-bridge inspect --from hermes ~/.hermes/sessions/<file>.jsonl
 
 Read the `pending state` block at the bottom:
 
-- `open tool calls: []` and `queued user input: 0` → it stopped cleanly; resuming
-  is straightforward.
-- Non-empty → the source stopped mid-turn. The conversion will carry those
-  forward in the handshake (step 4) so nothing is silently lost.
+- `open tool calls: []` and `queued user input: 0` mean it stopped cleanly, so
+  resuming is straightforward.
+- Anything non-empty means the source stopped mid-turn. The conversion carries
+  those forward in the handshake (step 4) so nothing is silently lost.
 
 ---
 
@@ -79,12 +79,12 @@ session-bridge convert \
 - `--from` / `--to` are any of `claude-code`, `codex`, `hermes`.
 - `-o` is the converted session file, in the target's format.
 - `--handshake-out` writes the resume instructions to a separate Markdown file
-  (optional but recommended — see step 4).
+  (optional but recommended; see step 4).
 
 **Conversion notes print to stderr.** These are the things that could not
 transfer losslessly (dropped tool schemas, flattened thread branches, reasoning
-signatures that can't cross providers). They are informational — the
-*conversation core* always survives; the notes tell you what degraded.
+signatures that can't cross providers). They are informational. The
+*conversation core* always survives; the notes just tell you what degraded.
 
 Add `--no-handshake` if you want a raw transcript with no injected resume message.
 
@@ -96,11 +96,11 @@ The handshake (`resume.md`, and by default also prepended as the first message o
 `resumed.jsonl`) is the instruction block that makes resumption deliberate. It
 tells the receiving agent what to do before continuing:
 
-- **Original context** — source model, working directory, turn count.
-- **Pending state** — open tool calls to re-run or abandon, queued user input
+- **Original context:** source model, working directory, turn count.
+- **Pending state:** open tool calls to re-run or abandon, and queued user input
   that was never processed. If the source stopped cleanly, this says "continue
   normally."
-- **Conversion notes** — what didn't transfer, so the agent doesn't assume a
+- **Conversion notes:** what didn't transfer, so the agent doesn't assume a
   dropped tool schema or lost branch was intentional.
 
 If there are open tool calls, the handshake names each one (tool + arguments) so
@@ -160,8 +160,8 @@ wrote resume handshake -> resume.md
 wrote 21 records -> resumed.jsonl
 ```
 
-21 records = the 20 original turns + 1 injected handshake. The two notes are the
-expected Hermes→Claude Code asymmetries: reasoning survives as text (not a
+21 records is the 20 original turns plus 1 injected handshake. The two notes are
+the expected Hermes→Claude Code asymmetries: reasoning survives as text (not a
 re-signable blob), and Hermes's 40 tool schemas are dropped because Claude Code
 supplies its own at runtime.
 
@@ -185,21 +185,21 @@ by session-bridge. Read this before continuing.
 - 40 tool schema(s) from hermes are dropped; ...
 ```
 
-`resumed.jsonl` is now a valid Claude Code session — drop it into
+`resumed.jsonl` is now a valid Claude Code session. Drop it into
 `~/.claude/projects/<dir>/` and continue.
 
 ---
 
 ## Troubleshooting
 
-- **`unknown source harness`** — `--from`/`--to` must be exactly `claude-code`,
+- **`unknown source harness`:** `--from`/`--to` must be exactly `claude-code`,
   `codex`, or `hermes`.
-- **Inspect shows 0 messages** — you likely pointed at a non-session `.jsonl`
+- **Inspect shows 0 messages:** you likely pointed at a non-session `.jsonl`
   (e.g. a log). Confirm the path matches the table in step 1.
-- **Conversion notes look alarming** — they're informational, not errors. The
+- **Conversion notes look alarming:** they're informational, not errors. The
   conversation core (messages, tool calls, results) always transfers; the notes
   only flag degraded extras.
-- **Codex sessions that used tools** — the Codex tool-call path follows the
+- **Codex sessions that used tools:** the Codex tool-call path follows the
   documented format but has not yet been validated against a real tool-using
   Codex log (see README "Known limitations").
 
