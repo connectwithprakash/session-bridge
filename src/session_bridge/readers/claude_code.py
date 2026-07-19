@@ -148,11 +148,11 @@ def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
             queue.pop(0)
         elif op == "remove" and queue:
             # Claude Code auto-withdraws an undelivered queued item (e.g. a
-            # background-task notification). Real `remove` records carry NO
-            # content (verified against real transcripts), and in real traces a
-            # remove immediately follows its own enqueue — so it withdraws the
-            # MOST-RECENTLY-enqueued pending item (LIFO). If a stray remove does
-            # carry content, honor an exact match first; otherwise pop the newest.
+            # background-task notification). Real `remove` records are mixed:
+            # some carry the withdrawn content, some carry none. When content is
+            # present, honor an exact match (newest-first). When absent, a remove
+            # in real traces immediately follows its own enqueue, so it withdraws
+            # the MOST-RECENTLY-enqueued pending item (LIFO).
             if content:
                 for i in range(len(queue) - 1, -1, -1):
                     if queue[i][1] == content:

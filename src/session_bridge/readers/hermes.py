@@ -66,8 +66,17 @@ def _parse_arguments(raw_args: Any) -> dict[str, Any]:
 def _assistant_blocks(record: dict[str, Any]) -> tuple[ContentBlock, ...]:
     blocks: list[ContentBlock] = []
     reasoning = record.get("reasoning")
+    # Reasoning presence has two signals in real Hermes data: the flat visible
+    # `reasoning` string, and a sibling `codex_reasoning_items` list (opaque
+    # encrypted extended-thinking, mirroring Codex). A real record often has
+    # reasoning=null WITH codex_reasoning_items present — emit a reasoning block
+    # from whichever signal exists so a real reasoning turn isn't silently lost.
+    codex_items = record.get("codex_reasoning_items")
     if isinstance(reasoning, str) and reasoning.strip():
         blocks.append(ContentBlock.reasoning(reasoning))
+    elif isinstance(codex_items, list) and codex_items:
+        # Content is opaque/encrypted; preserve presence with empty visible text.
+        blocks.append(ContentBlock.reasoning(""))
     # Text parts -> TEXT, non-text parts -> RAW passthrough (not dropped).
     blocks.extend(content_blocks(record.get("content")))
     for call in record.get("tool_calls") or []:
