@@ -113,10 +113,18 @@ session-bridge convert --from hermes --to claude-code SESSION.jsonl \
 # resume with:  (cd ~/Developer/myproject && claude --resume <uuid>)
 ```
 
-**Hermes** indexes sessions in a SQLite store; a dropped-in `.jsonl` (even
-correctly named) is not seen by `hermes sessions list` or `--resume`. Registering
-a converted session there needs a store-write step this tool does not yet perform
-([issue #1](https://github.com/connectwithprakash/session-bridge/issues/1)).
+**Hermes** stores sessions in a SQLite database (`~/.hermes/state.db`), across a
+`sessions` row plus one `messages` row per turn; the `.jsonl` files are exports,
+not the source of truth. `session_bridge.writers.hermes_db.register_hermes_session`
+writes those two tables (tested, backup-first, transaction-guarded). Verified
+against a real store: this makes the session appear in `hermes sessions list` and
+load without error. **But it is not yet full resume:** `hermes --resume` starts a
+fresh turn that does not replay the registered history, so the prior context is
+not visible to the model. Full context-resume needs more than these two tables
+(a `session_key`, a specific `end_reason`, or a companion `response_store.db`
+entry are the leading candidates). Tracked in
+[issue #1](https://github.com/connectwithprakash/session-bridge/issues/1); the
+writer is intentionally not exposed as a CLI command until resume actually works.
 
 ## Known limitations
 

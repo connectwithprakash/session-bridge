@@ -1,0 +1,200 @@
+"""Register a session into Hermes's SQLite store so `--resume` can find it.
+
+Unlike Claude Code (which resumes straight from a transcript file), Hermes keeps
+its sessions in ``~/.hermes/state.db`` across two tables:
+
+- ``sessions``: one row per session. Required columns are ``id``, ``source``,
+  ``started_at``; the rest are optional/defaulted.
+- ``messages``: one row per turn, keyed by ``session_id``. Required columns are
+  ``session_id``, ``role``, ``timestamp``.
+
+The ``.jsonl`` files under ``~/.hermes/sessions/`` are request dumps/exports, not
+the source of truth, so registering a session means writing these two tables.
+
+This module never targets a hard-coded path: the caller passes the DB path, so a
+sandbox copy and the real store use the same code. Writing to the real store is
+gated behind an explicit opt-in in the CLI, with a backup taken first.
+
+KNOWN GAP (verified against a real ~/.hermes/state.db): writing the ``sessions``
+and ``messages`` rows makes the session appear in ``hermes sessions list`` and
+load without error, but ``hermes --resume <id>`` does NOT replay the registered
+history into the model's context — it starts a fresh turn that cannot see the
+prior messages. Full context-resume needs more than these two tables (candidates:
+a ``session_key``, a specific ``end_reason``, or a companion entry in
+``response_store.db`` / the ``session_*.json`` sidecars). Until that is mapped,
+this writer is accurate for *listing/importing* a session, not yet for live
+context resumption. See issue #1.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from typing import Any, Optional
+
+from ..ir import BlockType, Message, Role, Session
+
+_ROLE_TO_DB = {
+    Role.USER: "user",
+    Role.ASSISTANT: "assistant",
+    Role.TOOL: "tool",
+    Role.SYSTEM: "system",
+}
+
+
+class HermesRegistrationError(RuntimeError):
+    pass
+
+
+def _require_schema(conn: sqlite3.Connection) -> None:
+    """Fail loudly if the DB isn't a Hermes state store, rather than creating
+    bogus tables in whatever file we were handed."""
+    tables = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    missing = {"sessions", "messages"} - tables
+    if missing:
+        raise HermesRegistrationError(
+            f"not a Hermes state.db (missing tables: {sorted(missing)})"
+        )
+
+
+def _title_conflict(conn: sqlite3.Connection, title: Optional[str]) -> bool:
+    if not title:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM sessions WHERE title = ? LIMIT 1", (title,)
+    ).fetchone()
+    return row is not None
+
+
+def _message_rows(
+    session_id: str, messages: tuple[Message, ...], base_ts: float = 0.0
+) -> list[dict[str, Any]]:
+    """Flatten IR messages into Hermes messages-table rows.
+
+    Timestamps are monotonic floats offset from ``base_ts`` (the session's
+    started_at) so ordering is stable and last-active lands near session start
+    even when the source timestamps are missing or non-numeric.
+    """
+    rows: list[dict[str, Any]] = []
+    for i, m in enumerate(messages):
+        ts = base_ts + float(i)
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        tool_call_id: Optional[str] = None
+        tool_name: Optional[str] = None
+        role = _ROLE_TO_DB.get(m.role, "user")
+
+        for b in m.content:
+            if b.type is BlockType.TEXT:
+                text_parts.append(b.text or "")
+            elif b.type is BlockType.REASONING:
+                reasoning_parts.append(b.text or "")
+            elif b.type is BlockType.TOOL_CALL:
+                tool_calls.append(
+                    {
+                        "id": b.call_id,
+                        "call_id": b.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": b.tool_name,
+                            "arguments": json.dumps(b.tool_input or {}),
+                        },
+                    }
+                )
+            elif b.type is BlockType.TOOL_RESULT:
+                role = "tool"
+                tool_call_id = b.call_id
+                text_parts.append(b.text or "")
+
+        rows.append(
+            {
+                "session_id": session_id,
+                "role": role,
+                "content": "\n".join(text_parts) if text_parts else None,
+                "tool_call_id": tool_call_id,
+                "tool_calls": json.dumps(tool_calls) if tool_calls else None,
+                "tool_name": tool_name,
+                "timestamp": ts,
+                "reasoning": "\n".join(reasoning_parts) if reasoning_parts else None,
+            }
+        )
+    return rows
+
+
+def register_hermes_session(
+    session: Session,
+    db_path: str,
+    session_id: str,
+    *,
+    source: str = "cli",
+    title: Optional[str] = None,
+    started_at: float = 0.0,
+) -> None:
+    """Insert one ``sessions`` row and its ``messages`` rows into ``db_path``.
+
+    ``started_at`` is a Unix epoch float; pass a real current time so the session
+    sorts to the top of ``hermes sessions list`` (which orders by activity and
+    truncates to a default limit). Left 0.0 the session registers correctly but
+    sinks to the bottom of the list. Message timestamps are offset from this base
+    so ordering is stable.
+
+    Raises HermesRegistrationError if the DB is not a Hermes store, the session id
+    already exists, or the title collides (the store has a UNIQUE title index).
+    All writes happen in a single transaction.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        _require_schema(conn)
+
+        existing = conn.execute(
+            "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if existing:
+            raise HermesRegistrationError(f"session id already exists: {session_id}")
+        if _title_conflict(conn, title):
+            raise HermesRegistrationError(f"title already in use: {title!r}")
+
+        msgs = _message_rows(session_id, session.messages, base_ts=started_at)
+        tool_call_count = sum(
+            1 for m in session.messages for b in m.content if b.type is BlockType.TOOL_CALL
+        )
+
+        with conn:  # transaction: commit on success, rollback on error
+            conn.execute(
+                """
+                INSERT INTO sessions
+                    (id, source, model, started_at, message_count,
+                     tool_call_count, title, cwd, archived)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    session_id,
+                    source,
+                    session.meta.model,
+                    started_at,
+                    len(msgs),
+                    tool_call_count,
+                    title,
+                    session.meta.cwd,
+                ),
+            )
+            conn.executemany(
+                """
+                INSERT INTO messages
+                    (session_id, role, content, tool_call_id, tool_calls,
+                     tool_name, timestamp, reasoning)
+                VALUES
+                    (:session_id, :role, :content, :tool_call_id, :tool_calls,
+                     :tool_name, :timestamp, :reasoning)
+                """,
+                msgs,
+            )
+    finally:
+        conn.close()
