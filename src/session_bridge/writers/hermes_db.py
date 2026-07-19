@@ -90,10 +90,18 @@ def _message_rows(
         reasoning_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         result_blocks = []
-        # Position (index in emission order) of the first non-result block, so the
-        # coalesced non-result row lands where the message's text/reasoning/calls
-        # actually began relative to its tool results — preserving source order
-        # rather than always emitting tool rows first.
+        # Position of the first non-result block, so the single coalesced
+        # non-result row (text/reasoning/tool_calls) lands relative to the tool
+        # rows at the point the message's non-result content began — fixing the
+        # old always-tool-rows-first bug for the common single-run shapes
+        # ([text, result] and [result, text]).
+        #
+        # LIMITATION: all non-result blocks collapse into ONE row at the FIRST
+        # non-result position, so a message that interleaves text on BOTH sides
+        # of a result ([text, result, text]) places the merged text before the
+        # result. No reader produces that shape (tool results always arrive in
+        # their own turn), so this is not reachable today; documented rather than
+        # solved with per-run row splitting to avoid speculative complexity.
         first_nonresult_pos = None
         seq = 0
 
