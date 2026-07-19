@@ -13,10 +13,14 @@ from ..ir import BlockType, ConversionReport, Session, ToolSchema
 
 # Which targets can hold which features.
 _TARGET_CAPS = {
-    "claude-code": {"thread_topology", "queued_input", "permission", "per_turn_model"},
+    "claude-code": {"thread_topology", "queued_input", "permission", "per_turn_model", "error_flag"},
     "codex": {"system_instructions", "permission", "per_turn_model"},
     "hermes": {"tool_schemas"},
 }
+
+# Prefix used to keep a failed-tool-call signal visible when the target format has
+# no native error flag (Codex function_call_output / Hermes role:tool).
+ERROR_MARKER = "[tool error] "
 
 
 def report_losses(session: Session, target: str) -> ConversionReport:
@@ -73,6 +77,20 @@ def report_losses(session: Session, target: str) -> ConversionReport:
             f"message(s) have no representation in {target}; surfaced in the resume "
             f"handshake instead."
         )
+
+    # 7. Failed tool results: only Claude Code has a native is_error flag.
+    if "error_flag" not in caps:
+        error_results = sum(
+            1
+            for m in session.messages
+            for b in m.content
+            if b.type is BlockType.TOOL_RESULT and b.is_error
+        )
+        if error_results:
+            report.warn(
+                f"{error_results} failed tool result(s): {target} has no native error "
+                f"flag; failure is preserved as a '{ERROR_MARKER.strip()}' text prefix only."
+            )
 
     # 6. Permission posture erased by Hermes.
     if session.meta.permission_mode and "permission" not in caps:

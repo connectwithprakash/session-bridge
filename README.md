@@ -88,9 +88,15 @@ The following are **inherently lossy** and are reported per conversion (see
   per the documented Responses shape but were not present in local sample data;
   covered by fixtures, pending validation against a tool-using Codex session.
 - Queued-input detection is conservative: it may over-report undelivered input
-  rather than silently drop it (the safe direction for resume).
+  rather than silently drop it (the safe direction for resume). Enqueue/dequeue
+  matching is scoped per `sessionId`.
 - Pending-state resumption produces a handshake for a human/agent to act on; it
   does not itself re-execute open tool calls.
+- Failed tool results: Codex and Hermes have no native error flag, so `is_error`
+  is preserved as a `[tool error]` text prefix (and reported) rather than a field.
+- Empty-content messages: writers preserve the turn to keep message count stable,
+  but a fully empty turn does not round-trip back through the Codex/Hermes readers'
+  content guards (documented; not observed in real data).
 
 ## Development
 

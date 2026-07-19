@@ -8,10 +8,11 @@ function_call / function_call_output).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..ir import BlockType, ConversionReport, Role, Session
-from ._common import report_losses
+from ._common import ERROR_MARKER, report_losses
 
 
 def _msg_payload(role: str, text: str) -> dict[str, Any]:
@@ -49,6 +50,7 @@ def write_codex(session: Session) -> tuple[list[dict[str, Any]], ConversionRepor
 
     for msg in session.messages:
         ts = msg.timestamp
+        before = len(records)
         for b in msg.content:
             if b.type is BlockType.TEXT:
                 role = "user" if msg.role is Role.USER else "assistant"
@@ -56,8 +58,6 @@ def write_codex(session: Session) -> tuple[list[dict[str, Any]], ConversionRepor
             elif b.type is BlockType.REASONING:
                 add({"type": "reasoning", "summary": [{"type": "summary_text", "text": b.text or ""}]}, ts)
             elif b.type is BlockType.TOOL_CALL:
-                import json
-
                 add(
                     {
                         "type": "function_call",
@@ -68,6 +68,13 @@ def write_codex(session: Session) -> tuple[list[dict[str, Any]], ConversionRepor
                     ts,
                 )
             elif b.type is BlockType.TOOL_RESULT:
-                add({"type": "function_call_output", "call_id": b.call_id, "output": b.text or ""}, ts)
+                output = b.text or ""
+                if b.is_error:
+                    output = ERROR_MARKER + output
+                add({"type": "function_call_output", "call_id": b.call_id, "output": output}, ts)
+        # Preserve an otherwise-empty message so message count survives the round trip.
+        if len(records) == before and msg.role in (Role.USER, Role.ASSISTANT):
+            role = "user" if msg.role is Role.USER else "assistant"
+            add(_msg_payload(role, ""), ts)
 
     return records, report

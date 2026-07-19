@@ -60,14 +60,21 @@ def write_claude_code(session: Session) -> tuple[list[dict[str, Any]], Conversio
     records: list[dict[str, Any]] = []
 
     # Preserve original uids/links when present; else synthesize a linear chain.
+    # A message keeps its real parent link only when that parent was actually
+    # emitted before it; otherwise (a real root, or a synthesized message such as
+    # an injected handshake) it chains onto the emitted predecessor. This keeps a
+    # prepended handshake as the new thread root instead of leaving it orphaned.
     have_links = any(m.parent_uid for m in session.messages)
     prev_uid: Optional[str] = None
+    emitted_uids: set[str] = set()
 
     for i, msg in enumerate(session.messages):
         uid = msg.uid or _synth_uid(i)
-        if have_links and msg.uid:
+        if have_links and msg.uid and msg.parent_uid and msg.parent_uid in emitted_uids:
             parent = msg.parent_uid
         else:
+            # Real root, synthesized message, or a parent not yet emitted: attach
+            # to the running predecessor so the thread stays a single connected chain.
             parent = prev_uid
 
         if msg.role is Role.USER or (
@@ -103,5 +110,6 @@ def write_claude_code(session: Session) -> tuple[list[dict[str, Any]], Conversio
             }
         )
         prev_uid = uid
+        emitted_uids.add(uid)
 
     return records, report

@@ -105,19 +105,36 @@ def _extract_meta(record: dict[str, Any], base: SessionMeta) -> SessionMeta:
 
 
 def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
-    """Enqueued user inputs with no matching later dequeue are undelivered."""
-    pending: list[str] = []
+    """Enqueued user inputs with no matching later dequeue are undelivered.
+
+    Matching is scoped per ``sessionId`` so a dequeue from one session cannot
+    consume another session's queued item when a file mixes sessions. Emission
+    order follows first-enqueue order across sessions.
+    """
+    per_session: dict[str, list[str]] = {}
+    order: list[str] = []
     for rec in records:
         if rec.get("type") != "queue-operation":
             continue
+        sid = rec.get("sessionId", "")
         op = rec.get("operation")
         content = rec.get("content", "")
+        queue = per_session.setdefault(sid, [])
         if op == "enqueue" and content:
-            pending.append(content)
-        elif op == "dequeue" and pending:
-            # A dequeue consumes the oldest queued item.
-            pending.pop(0)
-    return tuple(pending)
+            queue.append(content)
+            order.append(content)
+        elif op == "dequeue" and queue:
+            # A dequeue consumes this session's oldest queued item.
+            queue.pop(0)
+    remaining = {c for q in per_session.values() for c in q}
+    # Preserve first-enqueue order, keep only still-pending items, dedupe.
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in order:
+        if c in remaining and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return tuple(out)
 
 
 def read_claude_code(path: str | Path) -> Session:

@@ -113,10 +113,12 @@ def read_hermes(path: str | Path) -> Session:
             )
             tools = _parse_tool_schemas(rec.get("tools"))
         elif role == "user":
+            content = rec.get("content", "")
+            blocks = (ContentBlock.text_block(content),) if content else ()
             messages.append(
                 Message(
                     role=Role.USER,
-                    content=(ContentBlock.text_block(rec.get("content", "")),),
+                    content=blocks,
                     timestamp=rec.get("timestamp"),
                     raw=rec,
                 )

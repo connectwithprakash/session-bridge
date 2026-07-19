@@ -11,8 +11,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..ir import BlockType, ConversionReport, Message, Role, Session
-from ._common import reconstruct_tool_schemas, report_losses
+from ..ir import BlockType, ConversionReport, ContentBlock, Message, Role, Session
+from ._common import ERROR_MARKER, reconstruct_tool_schemas, report_losses
+
+
+def _tool_record(block: ContentBlock, timestamp: Any) -> dict[str, Any]:
+    content = block.text or ""
+    if block.is_error:
+        content = ERROR_MARKER + content
+    return {
+        "role": "tool",
+        "content": content,
+        "tool_call_id": block.call_id,
+        "timestamp": timestamp,
+    }
 
 
 def _tool_catalog(session: Session) -> list[dict[str, Any]]:
@@ -84,31 +96,21 @@ def write_hermes(session: Session) -> tuple[list[dict[str, Any]], ConversionRepo
             # A user record may carry tool_result blocks (Claude Code convention);
             # split those into Hermes role:tool records.
             text = msg.text()
-            if text:
+            has_result = any(b.type is BlockType.TOOL_RESULT for b in msg.content)
+            # Preserve the turn even when empty (no text, no results) so message
+            # count survives the round trip; only suppress the plain-user record
+            # when the turn's content is entirely tool results.
+            if text or not has_result:
                 records.append({"role": "user", "content": text, "timestamp": msg.timestamp})
             for b in msg.content:
                 if b.type is BlockType.TOOL_RESULT:
-                    records.append(
-                        {
-                            "role": "tool",
-                            "content": b.text or "",
-                            "tool_call_id": b.call_id,
-                            "timestamp": msg.timestamp,
-                        }
-                    )
+                    records.append(_tool_record(b, msg.timestamp))
         elif msg.role is Role.ASSISTANT:
             records.append(_assistant_record(msg))
         elif msg.role is Role.TOOL:
             for b in msg.content:
                 if b.type is BlockType.TOOL_RESULT:
-                    records.append(
-                        {
-                            "role": "tool",
-                            "content": b.text or "",
-                            "tool_call_id": b.call_id,
-                            "timestamp": msg.timestamp,
-                        }
-                    )
+                    records.append(_tool_record(b, msg.timestamp))
         elif msg.role is Role.SYSTEM:
             records.append({"role": "system", "content": msg.text(), "timestamp": msg.timestamp})
 
