@@ -95,6 +95,34 @@ def test_registers_session_and_messages(tmp_path):
     assert tool[3] == "c1" and "3 found" in tool[1]
 
 
+def test_model_override_sets_stored_model(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db)
+    # source session model is an Anthropic id Hermes can't route; override it
+    register_hermes_session(
+        _sample_session(), str(db), "s1", model="moonshotai/kimi-k3", started_at=123.0
+    )
+    conn = sqlite3.connect(db)
+    model, started = conn.execute(
+        "SELECT model, started_at FROM sessions WHERE id='s1'"
+    ).fetchone()
+    conn.close()
+    assert model == "moonshotai/kimi-k3"
+    assert started == 123.0
+
+
+def test_started_at_offsets_message_timestamps(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db)
+    register_hermes_session(_sample_session(), str(db), "s1", started_at=1000.0)
+    conn = sqlite3.connect(db)
+    ts = [r[0] for r in conn.execute(
+        "SELECT timestamp FROM messages WHERE session_id='s1' ORDER BY timestamp"
+    ).fetchall()]
+    conn.close()
+    assert ts == [1000.0, 1001.0, 1002.0, 1003.0]
+
+
 def test_rejects_non_hermes_db(tmp_path):
     db = tmp_path / "random.db"
     conn = sqlite3.connect(db)
@@ -119,6 +147,36 @@ def test_rejects_title_conflict(tmp_path):
     register_hermes_session(_sample_session(), str(db), "s1", title="Same")
     with pytest.raises(HermesRegistrationError, match="title already in use"):
         register_hermes_session(_sample_session(), str(db), "s2", title="Same")
+
+
+def test_cli_register_backs_up_and_registers(tmp_path):
+    import glob
+
+    from session_bridge.cli import main
+
+    db = tmp_path / "state.db"
+    _make_hermes_db(db)
+    # a minimal claude-code session file to register
+    src = tmp_path / "orig.jsonl"
+    src.write_text(
+        json.dumps({"parentUuid": None, "type": "user",
+                    "message": {"role": "user", "content": "hi FALCON"}, "uuid": "u1",
+                    "sessionId": "o", "cwd": "/tmp"}) + "\n",
+        encoding="utf-8",
+    )
+    rc = main([
+        "register", "--from", "claude-code", str(src),
+        "--db", str(db), "--model", "moonshotai/kimi-k3",
+        "--session-id", "cli_reg_1", "--title", "cli reg test",
+    ])
+    assert rc == 0
+    # a backup was written
+    assert glob.glob(str(db) + ".session-bridge-backup-*")
+    # session is in the store with the overridden model
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT model FROM sessions WHERE id='cli_reg_1'").fetchone()
+    conn.close()
+    assert row == ("moonshotai/kimi-k3",)
 
 
 def test_failed_insert_rolls_back(tmp_path):

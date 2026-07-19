@@ -15,15 +15,17 @@ This module never targets a hard-coded path: the caller passes the DB path, so a
 sandbox copy and the real store use the same code. Writing to the real store is
 gated behind an explicit opt-in in the CLI, with a backup taken first.
 
-KNOWN GAP (verified against a real ~/.hermes/state.db): writing the ``sessions``
-and ``messages`` rows makes the session appear in ``hermes sessions list`` and
-load without error, but ``hermes --resume <id>`` does NOT replay the registered
-history into the model's context — it starts a fresh turn that cannot see the
-prior messages. Full context-resume needs more than these two tables (candidates:
-a ``session_key``, a specific ``end_reason``, or a companion entry in
-``response_store.db`` / the ``session_*.json`` sidecars). Until that is mapped,
-this writer is accurate for *listing/importing* a session, not yet for live
-context resumption. See issue #1.
+Verified against a real ``~/.hermes/state.db``: writing the ``sessions`` and
+``messages`` rows is sufficient for full context resume. The session appears in
+``hermes sessions list``, and ``hermes --resume <id>`` replays the registered
+history so the model recalls it. Two conditions matter:
+
+- ``started_at`` must be a real timestamp, or the session sorts below the default
+  list limit.
+- the stored ``model`` must be one Hermes has a provider for; a cross-harness
+  source model id (e.g. an Anthropic ``claude-*`` id) that Hermes cannot route
+  makes the resumed turn fall back and lose context. Use the ``model`` argument to
+  set a Hermes-valid id.
 """
 
 from __future__ import annotations
@@ -135,6 +137,7 @@ def register_hermes_session(
     source: str = "cli",
     title: Optional[str] = None,
     started_at: float = 0.0,
+    model: Optional[str] = None,
 ) -> None:
     """Insert one ``sessions`` row and its ``messages`` rows into ``db_path``.
 
@@ -143,6 +146,14 @@ def register_hermes_session(
     truncates to a default limit). Left 0.0 the session registers correctly but
     sinks to the bottom of the list. Message timestamps are offset from this base
     so ordering is stable.
+
+    ``model`` overrides the stored model id. This matters for resume: Hermes routes
+    the resumed turn to the session's ``model``, so a cross-harness source model id
+    (e.g. an Anthropic ``claude-*`` id from a Claude Code session) that Hermes has
+    no provider for will fail to continue with context. Pass a model id Hermes is
+    configured for (verified: with a valid model, ``hermes --resume`` replays the
+    registered history and the model recalls it). Defaults to the session's own
+    model.
 
     Raises HermesRegistrationError if the DB is not a Hermes store, the session id
     already exists, or the title collides (the store has a UNIQUE title index).
@@ -177,7 +188,7 @@ def register_hermes_session(
                 (
                     session_id,
                     source,
-                    session.meta.model,
+                    model or session.meta.model,
                     started_at,
                     len(msgs),
                     tool_call_count,

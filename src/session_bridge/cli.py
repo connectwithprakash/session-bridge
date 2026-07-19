@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -81,6 +82,55 @@ def cmd_convert(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_register(args: argparse.Namespace) -> int:
+    """Register a converted session into Hermes's SQLite store so it resumes.
+
+    Takes a backup of the DB first (unless --no-backup). Claude Code needs no
+    registration — use `convert --place-claude-cwd` for that.
+    """
+    import shutil
+    import time
+    import uuid
+
+    from .writers.hermes_db import HermesRegistrationError, register_hermes_session
+
+    session = read_session(args.source, args.path)
+
+    db_path = args.db or os.path.expanduser("~/.hermes/state.db")
+    if not os.path.exists(db_path):
+        print(f"Hermes state.db not found: {db_path}", file=sys.stderr)
+        return 2
+
+    if not args.no_backup:
+        backup = f"{db_path}.session-bridge-backup-{int(time.time())}"
+        shutil.copy2(db_path, backup)
+        print(f"backed up state.db -> {backup}", file=sys.stderr)
+
+    session_id = args.session_id or f"sb_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    try:
+        register_hermes_session(
+            session,
+            db_path,
+            session_id,
+            title=args.title,
+            started_at=time.time(),
+            model=args.model,
+        )
+    except HermesRegistrationError as exc:
+        print(f"registration failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"registered session {session_id} into {db_path}")
+    if not args.model:
+        print(
+            "note: stored the source model id; if `hermes --resume` loses context, "
+            "re-register with --model set to a Hermes-configured model.",
+            file=sys.stderr,
+        )
+    print(f"resume with:  hermes --resume {session_id}", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="session-bridge", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -105,6 +155,22 @@ def build_parser() -> argparse.ArgumentParser:
     conv.add_argument("--session-id",
                       help="session id to use when placing (default: a fresh uuid)")
     conv.set_defaults(func=cmd_convert)
+
+    reg = sub.add_parser(
+        "register",
+        help="register a session into Hermes's SQLite store so `hermes --resume` finds it",
+    )
+    reg.add_argument("--from", dest="source", required=True, choices=HARNESSES)
+    reg.add_argument("path")
+    reg.add_argument("--db", help="path to Hermes state.db (default: ~/.hermes/state.db)")
+    reg.add_argument("--model",
+                     help="model id to store; set to a Hermes-configured model so resume "
+                          "keeps context (a cross-harness source id may not route)")
+    reg.add_argument("--title", help="session title (must be unique in the store)")
+    reg.add_argument("--session-id", help="session id to use (default: a generated sb_ id)")
+    reg.add_argument("--no-backup", action="store_true",
+                     help="skip backing up state.db first (not recommended)")
+    reg.set_defaults(func=cmd_register)
     return parser
 
 

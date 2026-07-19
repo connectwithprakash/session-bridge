@@ -115,16 +115,26 @@ session-bridge convert --from hermes --to claude-code SESSION.jsonl \
 
 **Hermes** stores sessions in a SQLite database (`~/.hermes/state.db`), across a
 `sessions` row plus one `messages` row per turn; the `.jsonl` files are exports,
-not the source of truth. `session_bridge.writers.hermes_db.register_hermes_session`
-writes those two tables (tested, backup-first, transaction-guarded). Verified
-against a real store: this makes the session appear in `hermes sessions list` and
-load without error. **But it is not yet full resume:** `hermes --resume` starts a
-fresh turn that does not replay the registered history, so the prior context is
-not visible to the model. Full context-resume needs more than these two tables
-(a `session_key`, a specific `end_reason`, or a companion `response_store.db`
-entry are the leading candidates). Tracked in
-[issue #1](https://github.com/connectwithprakash/session-bridge/issues/1); the
-writer is intentionally not exposed as a CLI command until resume actually works.
+not the source of truth. Use `session-bridge register` to write those rows (it
+backs up the DB first):
+
+```bash
+session-bridge register --from claude-code SESSION.jsonl \
+  --model moonshotai/kimi-k3 --title "resumed from claude code"
+# backed up state.db -> ...
+# registered session sb_... into ~/.hermes/state.db
+# resume with:  hermes --resume sb_...
+```
+
+Verified end-to-end against a real store: `hermes --resume` replays the registered
+history and the model recalls it. Two things matter, both handled by the command:
+
+- a real `started_at` (set automatically) so the session isn't sorted below the
+  default `hermes sessions list` limit;
+- `--model` must name a model Hermes has a provider for. A cross-harness source id
+  (e.g. an Anthropic `claude-*` id from a Claude Code session) that Hermes cannot
+  route makes the resumed turn fall back and lose context, so set `--model` to a
+  Hermes-configured model.
 
 ## Known limitations
 

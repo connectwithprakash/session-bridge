@@ -125,10 +125,21 @@ Run that printed command and the session continues live. Verified end-to-end: a
 converted session resumed in a real `claude` process and recalled a fact that
 existed only in the converted transcript.
 
-**Other targets.** For Hermes, a dropped-in file is not enough; its session store
-needs a row (see README, "Getting a converted session recognized by the target").
-Because the handshake is the first message, once a target does load the session,
-the agent picks up knowing exactly where the previous one left off.
+**Hermes target (one command).** Hermes keeps sessions in a SQLite store, so a
+dropped-in file is not enough. Use `register` instead of manual placement; it
+backs up the store first and prints the resume command:
+
+```bash
+session-bridge register --from claude-code SESSION.jsonl \
+  --model moonshotai/kimi-k3 --title "resumed session"
+# resume with:  hermes --resume sb_...
+```
+
+Set `--model` to a model Hermes is configured for, or the resumed turn loses
+context. Verified end-to-end: the resumed session recalls its prior history.
+
+Because the handshake is the first message, once a target loads the session the
+agent picks up knowing exactly where the previous one left off.
 
 ---
 
