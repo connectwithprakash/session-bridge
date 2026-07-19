@@ -152,13 +152,22 @@ def report_losses(session: Session, target: str) -> ConversionReport:
                 f"(e.g. image/document) degrade to a text placeholder in {target}."
             )
 
-    # 10. Hermes assistant-block ordering. Hermes stores an assistant turn in
-    # three separate fields (reasoning / content / tool_calls), so the reader can
-    # only reconstruct them in a fixed reasoning->text->tool_call order. A message
-    # whose blocks interleave those types in any other order loses that ordering
-    # even same-harness; report it rather than claim lossless.
+    # 10. Hermes block ordering. Hermes stores a turn's blocks in separate fields
+    # / rows, so the reader reconstructs them in a fixed rank order:
+    #   reasoning(0) -> text/raw(1) -> tool_call/tool_result(2).
+    # A message whose blocks interleave these in any other order loses that
+    # ordering even same-harness; report it rather than claim lossless. RAW is
+    # ranked with TEXT (the writer buckets them together) and TOOL_RESULT with
+    # TOOL_CALL (both emitted after text), so the check covers assistant AND
+    # user/tool messages, not just the assistant reasoning/text/tool_call case.
     if target == "hermes":
-        _order = {BlockType.REASONING: 0, BlockType.TEXT: 1, BlockType.TOOL_CALL: 2}
+        _order = {
+            BlockType.REASONING: 0,
+            BlockType.TEXT: 1,
+            BlockType.RAW: 1,
+            BlockType.TOOL_CALL: 2,
+            BlockType.TOOL_RESULT: 2,
+        }
         scrambled = 0
         for m in session.messages:
             ranks = [_order[b.type] for b in m.content if b.type in _order]
@@ -166,9 +175,9 @@ def report_losses(session: Session, target: str) -> ConversionReport:
                 scrambled += 1
         if scrambled:
             report.warn(
-                f"{scrambled} message(s) interleave reasoning/text/tool_call in an "
-                f"order Hermes cannot preserve (it stores them in separate fields); "
-                f"they reconstruct as reasoning->text->tool_call."
+                f"{scrambled} message(s) interleave block types in an order Hermes "
+                f"cannot preserve (it stores reasoning/text/tool in separate fields); "
+                f"they reconstruct as reasoning->text->tool."
             )
 
     return report
