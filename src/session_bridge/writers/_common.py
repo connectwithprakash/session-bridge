@@ -152,6 +152,25 @@ def report_losses(session: Session, target: str) -> ConversionReport:
                 f"(e.g. image/document) degrade to a text placeholder in {target}."
             )
 
+    # 10. Hermes assistant-block ordering. Hermes stores an assistant turn in
+    # three separate fields (reasoning / content / tool_calls), so the reader can
+    # only reconstruct them in a fixed reasoning->text->tool_call order. A message
+    # whose blocks interleave those types in any other order loses that ordering
+    # even same-harness; report it rather than claim lossless.
+    if target == "hermes":
+        _order = {BlockType.REASONING: 0, BlockType.TEXT: 1, BlockType.TOOL_CALL: 2}
+        scrambled = 0
+        for m in session.messages:
+            ranks = [_order[b.type] for b in m.content if b.type in _order]
+            if len(ranks) >= 2 and ranks != sorted(ranks):
+                scrambled += 1
+        if scrambled:
+            report.warn(
+                f"{scrambled} message(s) interleave reasoning/text/tool_call in an "
+                f"order Hermes cannot preserve (it stores them in separate fields); "
+                f"they reconstruct as reasoning->text->tool_call."
+            )
+
     return report
 
 
