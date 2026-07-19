@@ -132,12 +132,15 @@ def read_codex(path: str | Path) -> Session:
                 )
             elif ptype == "reasoning":
                 text = _reasoning_text(payload)
-                # Preserve the turn even when the reasoning summary is empty
-                # (redacted), matching the empty-message handling, so a reasoning
-                # record round-trips instead of vanishing.
-                content = (ContentBlock.reasoning(text),) if text else ()
+                # A reasoning record means a reasoning block EXISTED, so always
+                # emit one even when its summary text is empty. Real extended
+                # thinking stores content in an (unreadable) signature with empty
+                # visible text, so dropping empty-text reasoning would lose ~all
+                # real reasoning blocks and leave a contentless assistant turn.
                 messages.append(
-                    Message(role=Role.ASSISTANT, content=content, timestamp=ts, raw=rec)
+                    Message(role=Role.ASSISTANT,
+                            content=(ContentBlock.reasoning(text),),
+                            timestamp=ts, raw=rec)
                 )
             elif ptype == "function_call":
                 messages.append(

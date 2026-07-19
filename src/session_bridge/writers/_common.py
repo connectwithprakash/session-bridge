@@ -180,6 +180,23 @@ def report_losses(session: Session, target: str) -> ConversionReport:
                 f"they reconstruct as reasoning->text->tool."
             )
 
+        # 11. Empty-text reasoning to Hermes. Hermes stores reasoning as a flat
+        # string field that is empty for both "no reasoning" and "reasoning block
+        # with no visible text" (the shape real extended-thinking uses), so an
+        # empty-text reasoning block cannot be recovered on read-back. Report it.
+        empty_reasoning = sum(
+            1
+            for m in session.messages
+            for b in m.content
+            if b.type is BlockType.REASONING and not (b.text or "").strip()
+        )
+        if empty_reasoning:
+            report.warn(
+                f"{empty_reasoning} reasoning block(s) with no visible text cannot be "
+                f"represented in Hermes (its reasoning field can't distinguish an "
+                f"empty-text reasoning block from no reasoning); they are dropped."
+            )
+
     return report
 
 
