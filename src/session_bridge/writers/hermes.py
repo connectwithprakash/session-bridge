@@ -117,6 +117,18 @@ def write_hermes(session: Session) -> tuple[list[dict[str, Any]], ConversionRepo
             for b in msg.content:
                 if b.type is BlockType.TOOL_RESULT:
                     records.append(_tool_record(b, msg.timestamp))
+            # Defensive: a TOOL message normally carries only tool_result blocks
+            # (that is all any reader produces), but if it also has text/RAW, don't
+            # drop it — emit it as a system note so no content vanishes silently.
+            stray = "\n".join(
+                b.text or ""
+                for b in msg.content
+                if b.type in (BlockType.TEXT, BlockType.RAW)
+            )
+            if stray:
+                records.append(
+                    {"role": "system", "content": stray, "timestamp": msg.timestamp}
+                )
         elif msg.role is Role.SYSTEM:
             records.append(
                 {"role": "system", "content": msg.display_text(), "timestamp": msg.timestamp}
