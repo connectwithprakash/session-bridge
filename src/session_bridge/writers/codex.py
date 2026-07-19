@@ -75,14 +75,23 @@ def write_codex(
 
     for msg in session.messages:
         ts = msg.timestamp
-        before = len(records)
+        # Accumulate all TEXT/RAW blocks into ONE message payload per IR message.
+        # Emitting one message record per block would inflate the turn count on
+        # read-back (a common "assistant text then tool_call" turn would become
+        # two turns), so join them like the Hermes writers do.
+        text_parts = [
+            b.text or ""
+            for b in msg.content
+            if b.type in (BlockType.TEXT, BlockType.RAW)
+        ]
+        emitted = False
+        if text_parts:
+            add(_msg_payload(_codex_role(msg.role), "\n".join(text_parts)), ts)
+            emitted = True
         for b in msg.content:
-            if b.type is BlockType.TEXT or b.type is BlockType.RAW:
-                # RAW has no Codex representation; emit its placeholder text so the
-                # turn isn't silently dropped (the loss is reported separately).
-                add(_msg_payload(_codex_role(msg.role), b.text or ""), ts)
-            elif b.type is BlockType.REASONING:
+            if b.type is BlockType.REASONING:
                 add({"type": "reasoning", "summary": [{"type": "summary_text", "text": b.text or ""}]}, ts)
+                emitted = True
             elif b.type is BlockType.TOOL_CALL:
                 add(
                     {
@@ -93,13 +102,15 @@ def write_codex(
                     },
                     ts,
                 )
+                emitted = True
             elif b.type is BlockType.TOOL_RESULT:
                 output = b.text or ""
                 if b.is_error:
                     output = ERROR_MARKER + output
                 add({"type": "function_call_output", "call_id": b.call_id, "output": output}, ts)
+                emitted = True
         # Preserve an otherwise-empty message so message count survives the round trip.
-        if len(records) == before and msg.role in (Role.USER, Role.ASSISTANT, Role.SYSTEM):
+        if not emitted and msg.role in (Role.USER, Role.ASSISTANT, Role.SYSTEM):
             add(_msg_payload(_codex_role(msg.role), ""), ts)
 
     return records, report

@@ -114,8 +114,12 @@ def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
     consume another session's queued item when a file mixes sessions. Emission
     order follows first-enqueue order across sessions.
     """
-    per_session: dict[str, list[str]] = {}
-    order: list[str] = []
+    # Each queued item carries an enqueue sequence number so the still-pending
+    # items can be emitted in global first-enqueue order. Duplicates are kept
+    # (two identical undelivered messages are two pending items, not one) — a
+    # set-based dedup here would undercount genuinely-pending input.
+    per_session: dict[str, list[tuple[int, str]]] = {}
+    seq = 0
     for rec in records:
         if rec.get("type") != "queue-operation":
             continue
@@ -124,20 +128,14 @@ def _queued_messages(records: list[dict[str, Any]]) -> tuple[str, ...]:
         content = rec.get("content", "")
         queue = per_session.setdefault(sid, [])
         if op == "enqueue" and content:
-            queue.append(content)
-            order.append(content)
+            queue.append((seq, content))
+            seq += 1
         elif op == "dequeue" and queue:
             # A dequeue consumes this session's oldest queued item.
             queue.pop(0)
-    remaining = {c for q in per_session.values() for c in q}
-    # Preserve first-enqueue order, keep only still-pending items, dedupe.
-    seen: set[str] = set()
-    out: list[str] = []
-    for c in order:
-        if c in remaining and c not in seen:
-            seen.add(c)
-            out.append(c)
-    return tuple(out)
+    remaining = [item for q in per_session.values() for item in q]
+    remaining.sort(key=lambda item: item[0])
+    return tuple(content for _, content in remaining)
 
 
 def read_claude_code(path: str | Path) -> Session:

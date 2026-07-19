@@ -199,6 +199,10 @@ def register_hermes_session(
         tool_call_count = sum(
             1 for m in session.messages for b in m.content if b.type is BlockType.TOOL_CALL
         )
+        # message_count reflects logical IR turns, not emitted DB rows: one IR
+        # message with N parallel tool results expands to N+ rows, and counting
+        # rows would inflate the stat shown in `hermes sessions list`.
+        message_count = len(session.messages)
 
         try:
             with conn:  # transaction: commit on success, rollback on error
@@ -214,7 +218,7 @@ def register_hermes_session(
                         source,
                         model or session.meta.model,
                         started_at,
-                        len(msgs),
+                        message_count,
                         tool_call_count,
                         title,
                         session.meta.cwd,

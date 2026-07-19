@@ -10,6 +10,7 @@ handshake can compensate.
 from __future__ import annotations
 
 from ..ir import (
+    ERROR_MARKER,  # re-exported for writers that import it from here
     UNSUPPORTED_BLOCK_MARKER,
     BlockType,
     ConversionReport,
@@ -17,20 +18,19 @@ from ..ir import (
     ToolSchema,
 )
 
+__all__ = ["ERROR_MARKER", "report_losses", "reconstruct_tool_schemas"]
+
 # Which targets can hold which features. Only list a capability the corresponding
-# writer actually EMITS — claude_code.py does not write permissionMode or
-# queue-operation records, so those are not claimed here (else report_losses would
-# suppress a real loss and report.ok() would lie).
+# writer actually EMITS. Notably NOT claimed:
+#   - per_turn_model: the IR has no per-message model field, so every writer
+#     stamps the single session model on every turn; a mid-session model switch
+#     is therefore always lossy and must be reported (no writer implements it).
+#   - claude-code permissionMode / queue-operation: the claude writer emits neither.
 _TARGET_CAPS = {
-    "claude-code": {"thread_topology", "per_turn_model", "error_flag", "raw_passthrough"},
-    "codex": {"system_instructions", "permission", "per_turn_model"},
+    "claude-code": {"thread_topology", "error_flag", "raw_passthrough"},
+    "codex": {"system_instructions", "permission"},
     "hermes": {"tool_schemas"},
 }
-
-# Prefix used to keep a failed-tool-call signal visible when the target format has
-# no native error flag (Codex function_call_output / Hermes role:tool).
-ERROR_MARKER = "[tool error] "
-
 
 
 def report_losses(session: Session, target: str) -> ConversionReport:
@@ -101,6 +101,22 @@ def report_losses(session: Session, target: str) -> ConversionReport:
                 f"{error_results} failed tool result(s): {target} has no native error "
                 f"flag; failure is preserved as a '{ERROR_MARKER.strip()}' text prefix only."
             )
+
+    # 7b. Per-turn model switch: the IR has no per-message model field, so a
+    # session that used more than one model collapses to session.meta.model on
+    # write. Detect it from the raw records and report the collapse.
+    models_seen = {
+        m.raw.get("message", {}).get("model")
+        for m in session.messages
+        if isinstance(m.raw, dict) and isinstance(m.raw.get("message"), dict)
+        and m.raw["message"].get("model")
+    }
+    if len(models_seen) > 1:
+        report.warn(
+            f"{len(models_seen)} models used across turns "
+            f"({', '.join(sorted(str(x) for x in models_seen))}); the IR keeps only one "
+            f"session model, so per-turn model attribution is lost."
+        )
 
     # 6. Permission posture erased by Hermes.
     if session.meta.permission_mode and "permission" not in caps:

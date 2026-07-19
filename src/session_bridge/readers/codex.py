@@ -29,6 +29,7 @@ from ..ir import (
     Role,
     Session,
     SessionMeta,
+    recover_tool_error,
 )
 from ._content import content_blocks
 from ._jsonl import load_records
@@ -163,14 +164,18 @@ def read_codex(path: str | Path) -> Session:
                     if failed:
                         is_error = True
                     out = out.get("content", json.dumps(out))
+                text = out if isinstance(out, str) else json.dumps(out)
+                # Recover an error baked into text by a prior hop (a writer with no
+                # native error flag prefixes ERROR_MARKER), so failure survives.
+                text, marked = recover_tool_error(text)
                 messages.append(
                     Message(
                         role=Role.TOOL,
                         content=(
                             ContentBlock.tool_result(
                                 call_id=payload.get("call_id", ""),
-                                text=out if isinstance(out, str) else json.dumps(out),
-                                is_error=is_error,
+                                text=text,
+                                is_error=is_error or marked,
                             ),
                         ),
                         timestamp=ts,

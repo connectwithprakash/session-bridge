@@ -25,6 +25,21 @@ from typing import Any, Optional
 # definition; report_losses scans for it to report the loss.
 UNSUPPORTED_BLOCK_MARKER = "[unsupported "
 
+# Prefix a writer prepends to a failed tool result when the target format has no
+# native error flag (Codex / Hermes). Readers recover is_error from it so a
+# failure survives a multi-hop round trip instead of reading back as success.
+ERROR_MARKER = "[tool error] "
+
+
+def recover_tool_error(text: str) -> tuple[str, bool]:
+    """If ``text`` carries the ERROR_MARKER prefix, strip it and report an error.
+
+    Lets a reader reconstruct ``is_error`` for a result whose failure was baked
+    into text by a prior hop's writer (the target had no native error flag)."""
+    if text.startswith(ERROR_MARKER):
+        return text[len(ERROR_MARKER):], True
+    return text, False
+
 
 class Role(str, Enum):
     USER = "user"

@@ -24,6 +24,7 @@ from ..ir import (
     Session,
     SessionMeta,
     ToolSchema,
+    recover_tool_error,
 )
 from ._content import content_blocks
 from ._jsonl import load_records
@@ -135,13 +136,15 @@ def read_hermes(path: str | Path) -> Session:
                 )
             )
         elif role == "tool":
+            text, marked = recover_tool_error(rec.get("content", "") or "")
             messages.append(
                 Message(
                     role=Role.TOOL,
                     content=(
                         ContentBlock.tool_result(
                             call_id=rec.get("tool_call_id", ""),
-                            text=rec.get("content", ""),
+                            text=text,
+                            is_error=marked,
                         ),
                     ),
                     timestamp=rec.get("timestamp"),
