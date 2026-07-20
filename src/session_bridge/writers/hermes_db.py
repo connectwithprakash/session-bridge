@@ -49,6 +49,32 @@ class HermesRegistrationError(RuntimeError):
     pass
 
 
+def backup_hermes_db(db_path: str, backup_path: str) -> None:
+    """Copy the live Hermes store to ``backup_path`` safely.
+
+    A plain file copy (``shutil.copy2``) copies only the main ``.db`` file, not
+    the sibling ``-wal``/``-shm``. Hermes runs in WAL mode with the gateway
+    daemon holding the DB open, so committed rows can live in the ``-wal`` file
+    unflushed for an arbitrary time; a main-file-only copy silently omits them
+    — the backup can even lack tables entirely if the schema was created in the
+    same WAL. That defeats the backup's whole purpose (a safety net before a
+    mutating write to the user's real store).
+
+    SQLite's online backup API reads through the live database state (main file
+    + WAL), so the backup is complete and internally consistent regardless of
+    checkpoint timing, and it is safe against concurrent writers.
+    """
+    src = sqlite3.connect(db_path)
+    try:
+        dest = sqlite3.connect(backup_path)
+        try:
+            src.backup(dest)
+        finally:
+            dest.close()
+    finally:
+        src.close()
+
+
 def _require_schema(conn: sqlite3.Connection) -> None:
     """Fail loudly if the DB isn't a Hermes state store, rather than creating
     bogus tables in whatever file we were handed."""

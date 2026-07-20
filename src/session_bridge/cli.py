@@ -103,14 +103,17 @@ def cmd_register(args: argparse.Namespace) -> int:
     Takes a backup of the DB first (unless --no-backup). Claude Code needs no
     registration — use `convert --place-claude-cwd` for that.
     """
-    import shutil
     import time
     import uuid
 
     from ._ids import UnsafeSessionIdError, validate_session_id
     from .handshake import stub_open_tool_calls
     from .writers._common import report_losses
-    from .writers.hermes_db import HermesRegistrationError, register_hermes_session
+    from .writers.hermes_db import (
+        HermesRegistrationError,
+        backup_hermes_db,
+        register_hermes_session,
+    )
 
     session = read_session(args.source, args.path)
 
@@ -145,7 +148,10 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     if not args.no_backup:
         backup = f"{db_path}.session-bridge-backup-{int(time.time())}"
-        shutil.copy2(db_path, backup)
+        # WAL-safe: a plain file copy would miss committed rows still in the
+        # sibling -wal file (Hermes runs WAL with the gateway holding the DB
+        # open). The SQLite backup API reads through the live state.
+        backup_hermes_db(db_path, backup)
         print(f"backed up state.db -> {backup}", file=sys.stderr)
 
     try:
