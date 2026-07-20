@@ -92,6 +92,69 @@ def test_convert_stub_makes_transcript_resumable(tmp_path):
     assert any("no matching result" in w for w in result.report.warnings)
 
 
+def _hermes_db(path):
+    import sqlite3
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL, model TEXT, "
+        "started_at REAL NOT NULL, message_count INTEGER DEFAULT 0, tool_call_count INTEGER DEFAULT 0, "
+        "title TEXT, cwd TEXT, archived INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id), "
+        "role TEXT NOT NULL, content TEXT, tool_call_id TEXT, tool_calls TEXT, tool_name TEXT, "
+        "timestamp REAL NOT NULL, reasoning TEXT);"
+    )
+    conn.commit(); conn.close()
+
+
+def _open_call_source(tmp_path):
+    src = tmp_path / "in.jsonl"
+    src.write_text(
+        json.dumps({"parentUuid": None, "type": "assistant", "uuid": "a1", "cwd": "/t",
+                    "sessionId": "s", "message": {"role": "assistant", "model": "m",
+                    "content": [{"type": "tool_use", "id": "OPEN", "name": "Bash", "input": {}}]}}) + "\n",
+        encoding="utf-8",
+    )
+    return src
+
+
+def test_register_stub_open_calls_makes_db_resumable(tmp_path):
+    # r24: register must have the same open-call remediation convert has.
+    import sqlite3
+    from session_bridge.cli import main
+
+    db = tmp_path / "state.db"
+    _hermes_db(db)
+    rc = main(["register", "--from", "claude-code", str(_open_call_source(tmp_path)),
+               "--db", str(db), "--model", "gpt-x", "--no-backup",
+               "--session-id", "reg_stub", "--stub-open-calls"])
+    assert rc == 0
+    conn = sqlite3.connect(db)
+    tool_rows = conn.execute(
+        "SELECT tool_call_id FROM messages WHERE session_id='reg_stub' AND role='tool'"
+    ).fetchall()
+    conn.close()
+    # the formerly-open call now has a matching tool row -> resumable
+    assert ("OPEN",) in tool_rows
+
+
+def test_register_without_stub_leaves_call_open(tmp_path):
+    import sqlite3
+    from session_bridge.cli import main
+
+    db = tmp_path / "state.db"
+    _hermes_db(db)
+    rc = main(["register", "--from", "claude-code", str(_open_call_source(tmp_path)),
+               "--db", str(db), "--model", "gpt-x", "--no-backup", "--session-id", "reg_plain"])
+    assert rc == 0
+    conn = sqlite3.connect(db)
+    tool_rows = conn.execute(
+        "SELECT tool_call_id FROM messages WHERE session_id='reg_plain' AND role='tool'"
+    ).fetchall()
+    conn.close()
+    # default: no synthetic result (but the warning was printed — see round 22 tests)
+    assert ("OPEN",) not in tool_rows
+
+
 def test_convert_without_stub_leaves_call_open(tmp_path):
     src = tmp_path / "in.jsonl"
     src.write_text(

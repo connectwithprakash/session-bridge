@@ -108,6 +108,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     import uuid
 
     from ._ids import UnsafeSessionIdError, validate_session_id
+    from .handshake import stub_open_tool_calls
     from .writers._common import report_losses
     from .writers.hermes_db import HermesRegistrationError, register_hermes_session
 
@@ -115,11 +116,20 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Surface conversion losses on the register path too (previously silent):
     # e.g. orphaned tool calls that break resume, dropped tool schemas, etc.
+    # Report from the PRE-stub session so an interrupted call is still disclosed.
     reg_report = report_losses(session, "hermes")
     if reg_report.warnings:
         print(f"\n{len(reg_report.warnings)} conversion note(s):", file=sys.stderr)
         for w in reg_report.warnings:
             print(f"  - {w}", file=sys.stderr)
+
+    # register is the command that makes `hermes --resume` work, so it needs the
+    # same open-call remediation convert has: a genuinely-open tool call is
+    # written into state.db in a shape the provider rejects on resume. With
+    # --stub-open-calls, append a synthetic interrupted result so the registered
+    # session is actually resumable (the warning above still discloses it).
+    if args.stub_open_calls:
+        session = stub_open_tool_calls(session)
 
     db_path = args.db or os.path.expanduser("~/.hermes/state.db")
     if not os.path.exists(db_path):
@@ -206,6 +216,11 @@ def build_parser() -> argparse.ArgumentParser:
     reg.add_argument("--session-id", help="session id to use (default: a generated sb_ id)")
     reg.add_argument("--no-backup", action="store_true",
                      help="skip backing up state.db first (not recommended)")
+    reg.add_argument("--stub-open-calls", action="store_true",
+                     help="append a synthetic interrupted tool_result for each "
+                          "still-open tool call before registering, so the stored "
+                          "session is resumable (a call with no result breaks "
+                          "`hermes --resume`)")
     reg.set_defaults(func=cmd_register)
     return parser
 
