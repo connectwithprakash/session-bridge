@@ -35,22 +35,37 @@ def claude_project_dir(cwd: str, claude_home: Optional[Path] = None) -> Path:
     return home / "projects" / encode_cwd(cwd)
 
 
+class SessionExistsError(FileExistsError):
+    """A transcript already exists at the target session-id path."""
+
+
 def place_claude_code(
     records: list[dict[str, Any]],
     cwd: str,
     session_id: str,
     *,
     claude_home: Optional[Path] = None,
+    overwrite: bool = False,
 ) -> Path:
     """Write ``records`` as a resumable Claude Code session for ``cwd``.
 
     Returns the transcript path. Rewrites ``sessionId``/``cwd`` on message
     records so the transcript is internally consistent with where it lives.
+
+    Fails closed if a transcript already exists at the target path (a reused
+    session id) unless ``overwrite`` is set: silently clobbering a placed
+    transcript would destroy a possibly-precious recovered session, mirroring
+    the duplicate-id guard ``register_hermes_session`` already enforces.
     """
     validate_session_id(session_id)  # reject path-traversal ids before touching the fs
     directory = claude_project_dir(cwd, claude_home)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{session_id}.jsonl"
+    if target.exists() and not overwrite:
+        raise SessionExistsError(
+            f"a session transcript already exists at {target}; "
+            f"choose a different --session-id or pass --force to overwrite"
+        )
 
     real_cwd = os.path.realpath(os.path.expanduser(cwd))
     lines: list[str] = []

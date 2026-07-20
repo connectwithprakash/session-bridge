@@ -45,6 +45,12 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 def cmd_convert(args: argparse.Namespace) -> int:
     import time
 
+    # Validate incompatible flags before writing anything, so an invalid combo
+    # doesn't leave a stray -o output file on disk alongside the error.
+    if args.place_claude_cwd and args.target != "claude-code":
+        print("--place-claude-cwd only applies when --to claude-code", file=sys.stderr)
+        return 2
+
     # Stamp Codex output with the real current time so the session isn't dated to
     # the writer's placeholder epoch (which can hide it from Codex's recency sort).
     codex_ts = None
@@ -75,23 +81,30 @@ def cmd_convert(args: argparse.Namespace) -> int:
         print(f"wrote resume handshake -> {args.handshake_out}", file=sys.stderr)
 
     if args.place_claude_cwd:
-        if args.target != "claude-code":
-            print("--place-claude-cwd only applies when --to claude-code", file=sys.stderr)
-            return 2
+        import shlex
         import uuid
 
         from ._ids import UnsafeSessionIdError
-        from .place import place_claude_code
+        from .place import SessionExistsError, place_claude_code
 
         session_id = args.session_id or str(uuid.uuid4())
         try:
-            placed = place_claude_code(result.records, args.place_claude_cwd, session_id)
+            placed = place_claude_code(
+                result.records,
+                args.place_claude_cwd,
+                session_id,
+                overwrite=args.force,
+            )
         except UnsafeSessionIdError as exc:
             print(f"invalid --session-id: {exc}", file=sys.stderr)
             return 2
+        except SessionExistsError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         print(f"placed resumable session -> {placed}", file=sys.stderr)
         print(
-            f"resume with:  (cd {args.place_claude_cwd} && claude --resume {session_id})",
+            f"resume with:  (cd {shlex.quote(args.place_claude_cwd)} "
+            f"&& claude --resume {shlex.quote(session_id)})",
             file=sys.stderr,
         )
     return 0
@@ -206,6 +219,9 @@ def build_parser() -> argparse.ArgumentParser:
                            "(only valid with --to claude-code)")
     conv.add_argument("--session-id",
                       help="session id to use when placing (default: a fresh uuid)")
+    conv.add_argument("--force", action="store_true",
+                      help="overwrite an existing placed transcript at the same "
+                           "--session-id (default: fail rather than clobber it)")
     conv.set_defaults(func=cmd_convert)
 
     reg = sub.add_parser(
@@ -232,6 +248,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import json
     import sqlite3
 
     parser = build_parser()
@@ -246,9 +263,19 @@ def main(argv: list[str] | None = None) -> int:
     except UnicodeDecodeError as exc:
         print(f"error: file is not valid UTF-8: {exc}", file=sys.stderr)
         return 2
+    except json.JSONDecodeError as exc:
+        # A hand-edited or tool-mangled interior line in a session file: the
+        # readers re-raise it by design; surface it cleanly, not as a traceback.
+        print(f"error: not a valid session file (JSON parse error): {exc}", file=sys.stderr)
+        return 2
     except sqlite3.Error as exc:
         # e.g. --db pointing at a file that is not a valid SQLite database.
         print(f"error: SQLite failure: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        # Catch-all for filesystem failures not covered above (e.g. ENAMETOOLONG,
+        # ENOSPC). Keep this last so the specific handlers above win.
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
 

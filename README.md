@@ -121,6 +121,10 @@ session-bridge convert --from hermes --to claude-code SESSION.jsonl \
 # resume with:  (cd ~/Developer/myproject && claude --resume <uuid>)
 ```
 
+If a transcript already exists at the chosen `--session-id`, placement fails
+rather than silently overwriting a recovered session; pass `--force` to replace
+it deliberately.
+
 **Hermes** stores sessions in a SQLite database (`~/.hermes/state.db`), across a
 `sessions` row plus one `messages` row per turn; the `.jsonl` files are exports,
 not the source of truth. Use `session-bridge register` to write those rows (it
