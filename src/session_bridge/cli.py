@@ -85,7 +85,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
         import uuid
 
         from ._ids import UnsafeSessionIdError
-        from .place import SessionExistsError, place_claude_code
+        from .place import SessionExistsError, UnsafeCwdError, place_claude_code
 
         session_id = args.session_id or str(uuid.uuid4())
         try:
@@ -97,6 +97,9 @@ def cmd_convert(args: argparse.Namespace) -> int:
             )
         except UnsafeSessionIdError as exc:
             print(f"invalid --session-id: {exc}", file=sys.stderr)
+            return 2
+        except UnsafeCwdError as exc:
+            print(f"invalid --place-claude-cwd: {exc}", file=sys.stderr)
             return 2
         except SessionExistsError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -121,7 +124,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     from ._ids import UnsafeSessionIdError, validate_session_id
     from .handshake import stub_open_tool_calls
-    from .writers._common import report_losses
+    from .writers._common import HERMES_DB_CAPS, report_losses
     from .writers.hermes_db import (
         HermesRegistrationError,
         backup_hermes_db,
@@ -133,7 +136,10 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Surface conversion losses on the register path too (previously silent):
     # e.g. orphaned tool calls that break resume, dropped tool schemas, etc.
     # Report from the PRE-stub session so an interrupted call is still disclosed.
-    reg_report = report_losses(session, "hermes")
+    # Use the DB writer's real capabilities (HERMES_DB_CAPS) rather than the
+    # "hermes" file-writer caps: the state.db has no tool-catalog column, so a
+    # hermes-sourced session's tool schemas ARE dropped here and must be warned.
+    reg_report = report_losses(session, "hermes", caps_override=HERMES_DB_CAPS)
     if reg_report.warnings:
         print(f"\n{len(reg_report.warnings)} conversion note(s):", file=sys.stderr)
         for w in reg_report.warnings:

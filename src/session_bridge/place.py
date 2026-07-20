@@ -22,6 +22,18 @@ from typing import Any, Optional
 from ._ids import validate_session_id
 
 
+class UnsafeCwdError(ValueError):
+    """The target cwd cannot be encoded into a safe project-dir name."""
+
+
+# encode_cwd collapses the whole cwd into ONE directory-name component (every
+# ``/`` -> ``-``), so its length is bounded by the filesystem's per-component
+# limit (255 on macOS/Linux). Guard well under that so mkdir raises a clean
+# UnsafeCwdError instead of a raw OSError (ENAMETOOLONG) — matching how
+# validate_session_id guards the id half of the same path.
+_MAX_ENCODED_CWD_LEN = 200
+
+
 def encode_cwd(cwd: str) -> str:
     """Reproduce Claude Code's project-dir encoding: resolve the real path
     (macOS symlinks such as /tmp -> /private/tmp matter) and replace every
@@ -58,6 +70,12 @@ def place_claude_code(
     the duplicate-id guard ``register_hermes_session`` already enforces.
     """
     validate_session_id(session_id)  # reject path-traversal ids before touching the fs
+    encoded = encode_cwd(cwd)
+    if len(encoded) > _MAX_ENCODED_CWD_LEN:
+        raise UnsafeCwdError(
+            f"target cwd encodes to a {len(encoded)}-char directory name "
+            f"(max {_MAX_ENCODED_CWD_LEN}); use a shorter path"
+        )
     directory = claude_project_dir(cwd, claude_home)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{session_id}.jsonl"

@@ -30,13 +30,25 @@ __all__ = ["ERROR_MARKER", "report_losses", "reconstruct_tool_schemas"]
 _TARGET_CAPS = {
     "claude-code": {"thread_topology", "error_flag", "raw_passthrough"},
     "codex": {"system_instructions", "permission"},
+    # NB: this is the Hermes *file* writer (writers/hermes.py), which emits a
+    # tools catalog. The Hermes *DB* writer (writers/hermes_db.py, used by
+    # `register`) has no tool-catalog column, so it does NOT hold tool_schemas.
+    # report_losses is keyed by target NAME, not by writer, so the register path
+    # must pass caps_override to declare the DB writer's real (narrower)
+    # capabilities — otherwise dropped tool schemas go unreported.
     "hermes": {"tool_schemas"},
 }
 
+# The Hermes SQLite store (register path) persists messages/turns but no tool
+# catalog, so it drops tool schemas the file writer would keep.
+HERMES_DB_CAPS: frozenset = frozenset()
 
-def report_losses(session: Session, target: str) -> ConversionReport:
+
+def report_losses(
+    session: Session, target: str, caps_override=None
+) -> ConversionReport:
     report = ConversionReport()
-    caps = _TARGET_CAPS.get(target, set())
+    caps = caps_override if caps_override is not None else _TARGET_CAPS.get(target, set())
     src = session.meta.source_harness
 
     # 1. Thread topology (Claude Code only) flattened when target lacks it.
